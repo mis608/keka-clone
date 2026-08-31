@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+{% block title %}Login - Keka HRMS Clone{% endblock %}
+{% block body %}
+<div class="min-h-screen flex">
+    <!-- Left - Branding -->
+    <div class="hidden lg:flex w-[52%] bg-[#1e1f2b] relative overflow-hidden flex-col justify-between p-12">
+        <div class="absolute inset-0">
+            <div class="absolute top-[-20%] left-[-10%] w-[70%] h-[70%] bg-[#584ac0]/20 rounded-full blur-[120px]"></div>
+            <div class="absolute bottom-[-10%] right-[-10%] w-[60%] h-[60%] bg-[#7c6cff]/20 rounded-full blur-[120px]"></div>
+        </div>
+        
+        <div class="relative z-10">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 bg-white rounded-xl flex items-center justify-center font-display font-bold text-[#584ac0] text-xl">K</div>
+                <span class="text-white font-display font-bold text-2xl tracking-tight">keka</span>
+                <span class="text-white/40 text-sm ml-2 font-medium">CLONE</span>
+            </div>
+        </div>
+
+        <div class="relative z-10 max-w-[480px]">
+            <h1 class="text-[44px] leading-[1.1] font-display font-bold text-white mb-6">
+                The best HR<br/>software for<br/><span class="text-[#a89eff]">growing businesses.</span>
+            </h1>
+            <p class="text-white/60 text-[16px] leading-relaxed mb-10">Manage attendance, payroll, leave, hiring and performance - everything in one beautiful dashboard. Built with Python & Supabase.</p>
+            
+            <div class="grid grid-cols-2 gap-4">
+                <div class="bg-white/5 backdrop-blur border border-white/10 rounded-2xl p-5">
+                    <div class="w-10 h-10 rounded-xl bg-[#584ac0] flex items-center justify-center mb-3"><i class="fas fa-users text-white"></i></div>
+                    <div class="text-white font-semibold">Core HR & Payroll</div>
+                    <div class="text-white/50 text-sm mt-1">Automated salary & compliance</div>
+                </div>
+                <div class="bg-white/5 backdrop-blur border border-white/10 rounded-2xl p-5">
+                    <div class="w-10 h-10 rounded-xl bg-[#00b894] flex items-center justify-center mb-3"><i class="fas fa-chart-line text-white"></i></div>
+                    <div class="text-white font-semibold">Performance</div>
+                    <div class="text-white/50 text-sm mt-1">OKRs, reviews & feedback</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="relative z-10 flex items-center gap-3 text-white/40 text-sm">
+            <span>© 2026 Keka Clone</span><span>•</span><span>Built with Flask + Supabase</span>
+        </div>
+    </div>
+
+    <!-- Right - Login Form -->
+    <div class="flex-1 flex items-center justify-center p-8 bg-white">
+        <div class="w-full max-w-[380px]">
+            <div class="lg:hidden flex items-center gap-3 mb-10">
+                <div class="w-10 h-10 bg-[#1e1f2b] rounded-xl flex items-center justify-center font-display font-bold text-white text-xl">K</div>
+                <span class="font-display font-bold text-2xl">keka</span>
+            </div>
+
+            <div class="mb-8">
+                <h2 class="text-[28px] font-display font-bold text-[#1e1f2b] leading-tight">Welcome back!</h2>
+                <p class="text-[#8b8fa3] mt-2">Login to your HRMS dashboard</p>
+            </div>
+
+            <form id="loginForm" class="space-y-5">
+                <div>
+                    <label class="text-sm font-medium text-[#1e1f2b] mb-2 block">Work Email</label>
+                    <div class="relative">
+                        <span class="absolute left-4 top-1/2 -translate-y-1/2 text-[#8b8fa3]"><i class="far fa-envelope"></i></span>
+                        <input type="email" name="email" value="admin@company.com" required class="w-full pl-11 pr-4 py-3.5 rounded-xl border border-gray-200 focus:border-[#584ac0] focus:ring-4 focus:ring-[#584ac0]/10 outline-none transition text-[14px]" placeholder="you@company.com">
+                    </div>
+                </div>
+                <div>
+                    <div class="flex justify-between items-center mb-2">
+                        <label class="text-sm font-medium text-[#1e1f2b]">Password</label>
+                        <a href="#" class="text-sm text-[#584ac0] font-medium hover:underline">Forgot?</a>
+                    </div>
+                    <div class="relative">
+                        <span class="absolute left-4 top-1/2 -translate-y-1/2 text-[#8b8fa3]"><i class="fas fa-lock"></i></span>
+                        <input type="password" name="password" value="demo123" required class="w-full pl-11 pr-4 py-3.5 rounded-xl border border-gray-200 focus:border-[#584ac0] focus:ring-4 focus:ring-[#584ac0]/10 outline-none transition text-[14px]" placeholder="••••••••">
+                    </div>
+                    <p class="text-xs text-[#8b8fa3] mt-2">Demo: Use any email & password - no verification needed</p>
+                </div>
+
+                <button type="submit" class="w-full bg-[#584ac0] hover:bg-[#4a3db0] text-white font-semibold py-3.5 rounded-xl transition shadow-lg shadow-[#584ac0]/20 flex items-center justify-center gap-2">
+                    <span>Sign in to Keka</span><i class="fas fa-arrow-right text-sm"></i>
+                </button>
+
+                <div class="relative my-6">
+                    <div class="absolute inset-0 flex items-center"><div class="w-full border-t border-gray-200"></div></div>
+                    <div class="relative flex justify-center"><span class="bg-white px-3 text-xs text-[#8b8fa3] uppercase tracking-widest">Or continue with</span></div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-3">
+                    <button type="button" class="border border-gray-200 rounded-xl py-3 flex items-center justify-center gap-2 hover:bg-gray-50 transition"><img src="https://www.svgrepo.com/show/475656/google-color.svg" class="w-5 h-5"> <span class="text-sm font-medium">Google</span></button>
+                    <button type="button" class="border border-gray-200 rounded-xl py-3 flex items-center justify-center gap-2 hover:bg-gray-50 transition"><i class="fab fa-microsoft text-[#00a4ef]"></i> <span class="text-sm font-medium">Microsoft</span></button>
+                </div>
+            </form>
+
+            <div class="mt-8 p-4 rounded-xl bg-[#f6f7fb] border border-dashed border-gray-200">
+                <div class="flex gap-3">
+                    <div class="w-8 h-8 rounded-full bg-amber-100 flex items-center justify-center flex-shrink-0"><i class="fas fa-lightbulb text-amber-600 text-sm"></i></div>
+                    <div>
+                        <div class="text-sm font-semibold text-[#1e1f2b]">Quick Demo Access</div>
+                        <div class="text-xs text-[#8b8fa3] mt-1 leading-relaxed">No Supabase? App runs in <span class="font-semibold text-[#584ac0]">Mock Mode</span> with sample data. Add your Supabase keys in .env to connect real database.</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+document.getElementById('loginForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const form = e.target;
+    const btn = form.querySelector('button[type=submit]');
+    const original = btn.innerHTML;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Signing in...';
+    btn.disabled = true;
+
+    const formData = new FormData(form);
+    const payload = { email: formData.get('email'), password: formData.get('password') };
+
+    try {
+        const res = await fetch('/login', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if(data.success) window.location.href = data.redirect || '/dashboard';
+        else window.location.href = '/dashboard';
+    } catch(err) {
+        // Fallback - form POST
+        form.submit();
+    } finally {
+        btn.innerHTML = original;
+        btn.disabled = false;
+    }
+});
+</script>
+{% endblock %}

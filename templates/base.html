@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Keka HRMS Clone{% endblock %}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Plus+Jakarta+Sans:wght@500;600;700&display=swap" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: { 'sans': ['Inter', 'sans-serif'], 'display': ['Plus Jakarta Sans', 'sans-serif'] },
+                    colors: {
+                        keka: { primary: '#584ac0', dark: '#1e1f2b', sidebar: '#222433', card: '#ffffff', bg: '#f6f7fb', muted: '#8b8fa3' }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        * { font-family: 'Inter', sans-serif; }
+        .scrollbar-hide::-webkit-scrollbar { display: none; }
+        .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+        .keka-shadow { box-shadow: 0 2px 12px rgba(0,0,0,0.06); }
+        .keka-shadow-hover:hover { box-shadow: 0 8px 24px rgba(88,74,192,0.12); }
+    </style>
+    {% block head %}{% endblock %}
+</head>
+<body class="bg-keka-bg text-gray-800 antialiased">
+    {% block body %}{% endblock %}
+    {% block scripts %}{% endblock %}
+</body>
+</html>

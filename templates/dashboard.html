@@ -1,0 +1,393 @@
+{% extends "base.html" %}
+{% block title %}Dashboard - Keka HRMS{% endblock %}
+{% block head %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+  .nav-item.active { background: #2f3244; color: white; }
+  .nav-item.active i { color: white; }
+  .module-section { display: none; }
+  .module-section.active { display: block; animation: fadeIn 0.25s ease; }
+  @keyframes fadeIn { from { opacity:0; transform: translateY(6px);} to { opacity:1; transform: translateY(0);} }
+  .keka-card { background: white; border-radius: 16px; border: 1px solid #eef0f6; }
+</style>
+{% endblock %}
+
+{% block body %}
+<div class="flex h-screen overflow-hidden bg-[#f6f7fb]">
+  <!-- SIDEBAR - Keka Style -->
+  <aside class="w-[260px] bg-[#1e1f2b] flex flex-col flex-shrink-0">
+    <!-- Logo -->
+    <div class="h-[64px] flex items-center px-6 border-b border-white/[0.06]">
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 bg-white rounded-xl flex items-center justify-center font-display font-bold text-[#1e1f2b] text-[18px]">K</div>
+        <div>
+          <div class="text-white font-display font-bold text-[18px] leading-none tracking-tight">keka</div>
+          <div class="text-white/40 text-[10px] tracking-[0.2em] uppercase font-semibold -mt-0.5">HRMS CLONE</div>
+        </div>
+      </div>
+      <div class="ml-auto w-7 h-7 rounded-full bg-white/10 flex items-center justify-center text-white/60 hover:bg-white/15 cursor-pointer"><i class="fas fa-bars text-xs"></i></div>
+    </div>
+
+    <!-- Profile Switcher -->
+    <div class="p-4">
+      <div class="bg-white/[0.06] border border-white/[0.06] rounded-xl p-3 flex items-center gap-3">
+        <div class="w-9 h-9 rounded-full bg-[#584ac0] flex items-center justify-center text-white font-semibold text-sm">{{ user.avatar if user.avatar else 'AU' }}</div>
+        <div class="flex-1 min-w-0">
+          <div class="text-white text-[13px] font-semibold truncate">{{ user.name or 'Admin User' }}</div>
+          <div class="text-white/50 text-[11px] truncate">{{ user.email or 'admin@company.com' }}</div>
+        </div>
+        <i class="fas fa-chevron-down text-white/30 text-[10px]"></i>
+      </div>
+    </div>
+
+    <!-- Navigation -->
+    <nav class="flex-1 overflow-y-auto px-3 py-2 scrollbar-hide space-y-6">
+      <div>
+        <div class="text-[11px] font-semibold tracking-widest text-white/30 uppercase px-3 mb-2">Main</div>
+        <div class="space-y-1">
+          <a data-module="home" class="nav-item active flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13.5px] font-medium text-white/70 hover:bg-white/[0.06] hover:text-white transition cursor-pointer"><i class="fas fa-th-large w-5 text-white/40"></i> Home</a>
+          <a data-module="me" class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13.5px] font-medium text-white/70 hover:bg-white/[0.06] hover:text-white transition cursor-pointer"><i class="far fa-user w-5 text-white/40"></i> Me</a>
+          <a data-module="inbox" class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13.5px] font-medium text-white/70 hover:bg-white/[0.06] hover:text-white transition cursor-pointer"><i class="far fa-bell w-5 text-white/40"></i> Inbox <span class="ml-auto bg-[#ff5a5a] text-white text-[10px] px-1.5 py-0.5 rounded-full font-bold">4</span></a>
+        </div>
+      </div>
+
+      <div>
+        <div class="text-[11px] font-semibold tracking-widest text-white/30 uppercase px-3 mb-2">Organization</div>
+        <div class="space-y-1">
+          <a data-module="employees" class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13.5px] font-medium text-white/70 hover:bg-white/[0.06] hover:text-white transition cursor-pointer"><i class="fas fa-users w-5 text-white/40"></i> Employees</a>
+          <a data-module="orgchart" class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13.5px] font-medium text-white/70 hover:bg-white/[0.06] hover:text-white transition cursor-pointer"><i class="fas fa-sitemap w-5 text-white/40"></i> Org Chart</a>
+          <a data-module="documents" class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13.5px] font-medium text-white/70 hover:bg-white/[0.06] hover:text-white transition cursor-pointer"><i class="far fa-folder w-5 text-white/40"></i> Documents</a>
+        </div>
+      </div>
+
+      <div>
+        <div class="text-[11px] font-semibold tracking-widest text-white/30 uppercase px-3 mb-2">Time & Attendance</div>
+        <div class="space-y-1">
+          <a data-module="attendance" class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13.5px] font-medium text-white/70 hover:bg-white/[0.06] hover:text-white transition cursor-pointer"><i class="far fa-clock w-5 text-white/40"></i> Attendance</a>
+          <a data-module="leave" class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13.5px] font-medium text-white/70 hover:bg-white/[0.06] hover:text-white transition cursor-pointer"><i class="far fa-calendar-check w-5 text-white/40"></i> Leave</a>
+          <a data-module="timesheet" class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13.5px] font-medium text-white/70 hover:bg-white/[0.06] hover:text-white transition cursor-pointer"><i class="fas fa-stopwatch w-5 text-white/40"></i> Timesheet</a>
+        </div>
+      </div>
+
+      <div>
+        <div class="text-[11px] font-semibold tracking-widest text-white/30 uppercase px-3 mb-2">Payroll & Finance</div>
+        <div class="space-y-1">
+          <a data-module="payroll" class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13.5px] font-medium text-white/70 hover:bg-white/[0.06] hover:text-white transition cursor-pointer"><i class="fas fa-wallet w-5 text-white/40"></i> Payroll</a>
+          <a data-module="expenses" class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13.5px] font-medium text-white/70 hover:bg-white/[0.06] hover:text-white transition cursor-pointer"><i class="fas fa-receipt w-5 text-white/40"></i> Expenses</a>
+        </div>
+      </div>
+
+      <div>
+        <div class="text-[11px] font-semibold tracking-widest text-white/30 uppercase px-3 mb-2">Talent</div>
+        <div class="space-y-1">
+          <a data-module="hiring" class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13.5px] font-medium text-white/70 hover:bg-white/[0.06] hover:text-white transition cursor-pointer"><i class="fas fa-briefcase w-5 text-white/40"></i> Hiring</a>
+          <a data-module="performance" class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13.5px] font-medium text-white/70 hover:bg-white/[0.06] hover:text-white transition cursor-pointer"><i class="fas fa-bullseye w-5 text-white/40"></i> Performance</a>
+          <a data-module="reports" class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13.5px] font-medium text-white/70 hover:bg-white/[0.06] hover:text-white transition cursor-pointer"><i class="fas fa-chart-bar w-5 text-white/40"></i> Reports</a>
+        </div>
+      </div>
+    </nav>
+
+    <div class="p-3 border-t border-white/[0.06]">
+      <div class="bg-gradient-to-br from-[#584ac0] to-[#7c6cff] rounded-xl p-4 relative overflow-hidden">
+        <div class="absolute top-0 right-0 w-20 h-20 bg-white/10 rounded-full -mr-10 -mt-10"></div>
+        <div class="relative">
+          <div class="text-white font-semibold text-sm">Upgrade to Pro</div>
+          <div class="text-white/70 text-xs mt-1">Get advanced analytics & custom workflows</div>
+          <button class="mt-3 bg-white text-[#584ac0] text-xs font-semibold px-3 py-1.5 rounded-full">Upgrade now</button>
+        </div>
+      </div>
+      <a href="/logout" class="mt-3 flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13px] text-white/50 hover:text-white hover:bg-white/[0.06] transition"><i class="fas fa-sign-out-alt w-5"></i> Sign out</a>
+    </div>
+  </aside>
+
+  <!-- MAIN CONTENT -->
+  <div class="flex-1 flex flex-col overflow-hidden">
+    <!-- TOP HEADER -->
+    <header class="h-[64px] bg-white border-b border-[#eef0f6] flex items-center justify-between px-6 flex-shrink-0">
+      <div class="flex items-center gap-6">
+        <h1 id="pageTitle" class="font-display font-bold text-[20px] text-[#1e1f2b]">Home</h1>
+        <div class="hidden md:flex items-center gap-2 text-[13px] text-[#8b8fa3]"><span class="w-1 h-1 bg-gray-300 rounded-full"></span><span id="pageSubtitle">Good morning, Admin! Here's what's happening today.</span></div>
+      </div>
+      <div class="flex items-center gap-3">
+        <div class="relative hidden md:block">
+          <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-[#8b8fa3] text-sm"></i>
+          <input id="globalSearch" placeholder="Search employees, docs..." class="pl-9 pr-4 py-2.5 w-[280px] rounded-xl bg-[#f6f7fb] border border-transparent focus:bg-white focus:border-[#e0e3f0] outline-none text-sm transition">
+        </div>
+        <button class="w-10 h-10 rounded-xl bg-[#f6f7fb] hover:bg-[#eef0f6] flex items-center justify-center text-[#8b8fa3] transition"><i class="far fa-bell"></i></button>
+        <button class="w-10 h-10 rounded-xl bg-[#f6f7fb] hover:bg-[#eef0f6] flex items-center justify-center text-[#8b8fa3] transition"><i class="fas fa-question"></i></button>
+        <div class="w-px h-6 bg-[#eef0f6] mx-1"></div>
+        <div class="flex items-center gap-2 pl-1">
+          <div class="w-9 h-9 rounded-full bg-[#1e1f2b] text-white flex items-center justify-center font-semibold text-sm">AU</div>
+        </div>
+      </div>
+    </header>
+
+    <!-- SCROLLABLE CONTENT -->
+    <main class="flex-1 overflow-y-auto p-6 bg-[#f6f7fb]">
+
+      <!-- ================= HOME / DASHBOARD ================= -->
+      <div id="module-home" class="module-section active space-y-6">
+        <!-- Stats Row -->
+        <div class="grid grid-cols-12 gap-5">
+          <!-- Left Stats -->
+          <div class="col-span-12 lg:col-span-8 space-y-5">
+            <!-- Top Cards -->
+            <div class="grid grid-cols-4 gap-4">
+              <div class="keka-card p-5 keka-shadow-hover transition">
+                <div class="flex justify-between items-start">
+                  <div class="w-10 h-10 rounded-xl bg-[#eef0ff] flex items-center justify-center text-[#584ac0]"><i class="fas fa-users"></i></div>
+                  <span class="text-xs font-medium px-2 py-1 rounded-full bg-green-50 text-green-600">+3.2%</span>
+                </div>
+                <div class="mt-4"><div class="text-2xl font-display font-bold text-[#1e1f2b]" id="statTotalEmp">102</div><div class="text-[13px] text-[#8b8fa3] mt-1">Total Employees</div></div>
+              </div>
+              <div class="keka-card p-5 keka-shadow-hover transition">
+                <div class="flex justify-between items-start">
+                  <div class="w-10 h-10 rounded-xl bg-[#e6f9f0] flex items-center justify-center text-[#00b894]"><i class="fas fa-user-check"></i></div>
+                  <span class="text-xs font-medium px-2 py-1 rounded-full bg-green-50 text-green-600" id="statAttendanceRate">92%</span>
+                </div>
+                <div class="mt-4"><div class="text-2xl font-display font-bold text-[#1e1f2b]" id="statPresent">89</div><div class="text-[13px] text-[#8b8fa3] mt-1">Present Today</div></div>
+              </div>
+              <div class="keka-card p-5 keka-shadow-hover transition">
+                <div class="flex justify-between items-start">
+                  <div class="w-10 h-10 rounded-xl bg-[#fff4e6] flex items-center justify-center text-[#e17055]"><i class="fas fa-umbrella-beach"></i></div>
+                  <span class="text-xs font-medium px-2 py-1 rounded-full bg-amber-50 text-amber-600">Pending</span>
+                </div>
+                <div class="mt-4"><div class="text-2xl font-display font-bold text-[#1e1f2b]" id="statOnLeave">6</div><div class="text-[13px] text-[#8b8fa3] mt-1">On Leave</div></div>
+              </div>
+              <div class="keka-card p-5 keka-shadow-hover transition">
+                <div class="flex justify-between items-start">
+                  <div class="w-10 h-10 rounded-xl bg-[#f0f0ff] flex items-center justify-center text-[#6c5ce7]"><i class="fas fa-briefcase"></i></div>
+                  <span class="text-xs font-medium px-2 py-1 rounded-full bg-purple-50 text-purple-600">Hiring</span>
+                </div>
+                <div class="mt-4"><div class="text-2xl font-display font-bold text-[#1e1f2b]" id="statOpenJobs">11</div><div class="text-[13px] text-[#8b8fa3] mt-1">Open Positions</div></div>
+              </div>
+            </div>
+
+            <!-- Attendance Trend + Department -->
+            <div class="grid grid-cols-3 gap-4">
+              <div class="col-span-2 keka-card p-6">
+                <div class="flex justify-between items-center mb-6">
+                  <h3 class="font-display font-semibold text-[#1e1f2b]">Attendance Trend</h3>
+                  <select class="text-xs border border-[#eef0f6] rounded-full px-3 py-1.5 bg-[#f6f7fb]"><option>Last 7 days</option><option>Last 30 days</option></select>
+                </div>
+                <div class="h-[200px]"><canvas id="attendanceChart"></canvas></div>
+              </div>
+              <div class="keka-card p-6">
+                <h3 class="font-display font-semibold text-[#1e1f2b] mb-6">By Department</h3>
+                <div class="h-[200px] flex items-center justify-center"><canvas id="deptChart"></canvas></div>
+                <div id="deptLegend" class="mt-4 space-y-2 text-xs"></div>
+              </div>
+            </div>
+
+            <!-- Announcements & Birthdays -->
+            <div class="grid grid-cols-2 gap-4">
+              <div class="keka-card p-6">
+                <div class="flex justify-between items-center mb-4"><h3 class="font-display font-semibold">Announcements</h3><button class="text-xs text-[#584ac0] font-medium">View all</button></div>
+                <div id="announcementsList" class="space-y-3"></div>
+              </div>
+              <div class="keka-card p-6">
+                <div class="flex justify-between items-center mb-4"><h3 class="font-display font-semibold">Today</h3><span class="text-xs bg-[#f6f7fb] px-2 py-1 rounded-full">29 Aug</span></div>
+                <div class="space-y-4">
+                  <div>
+                    <div class="text-xs font-semibold tracking-widest text-[#8b8fa3] uppercase mb-3 flex items-center gap-2"><i class="fas fa-birthday-cake text-[#ff7675]"></i> Birthdays</div>
+                    <div class="flex items-center gap-3">
+                      <div class="flex -space-x-2"><div class="w-8 h-8 rounded-full bg-[#ffeaa7] border-2 border-white flex items-center justify-center text-xs font-bold">AS</div><div class="w-8 h-8 rounded-full bg-[#a29bfe] border-2 border-white flex items-center justify-center text-xs font-bold text-white">PN</div><div class="w-8 h-8 rounded-full bg-[#81ecec] border-2 border-white flex items-center justify-center text-xs font-bold">+3</div></div>
+                      <div class="text-[13px]"><span class="font-semibold">Aarav, Priya +3</span> have birthdays today</div>
+                    </div>
+                  </div>
+                  <div class="border-t border-[#f0f0f5] pt-4">
+                    <div class="text-xs font-semibold tracking-widest text-[#8b8fa3] uppercase mb-3 flex items-center gap-2"><i class="fas fa-award text-[#fdcb6e]"></i> Work Anniversaries</div>
+                    <div class="flex items-center gap-3"><div class="w-8 h-8 rounded-full bg-[#1e1f2b] text-white flex items-center justify-center text-xs font-bold">VS</div><div class="text-[13px]"><span class="font-semibold">Vikram Singh</span> - 7 years at company 🎉</div></div>
+                  </div>
+                  <div class="border-t border-[#f0f0f5] pt-4">
+                    <div class="text-xs font-semibold tracking-widest text-[#8b8fa3] uppercase mb-3">Who's on leave</div>
+                    <div class="flex items-center gap-2"><div class="w-6 h-6 rounded-full bg-[#fab1a0] flex items-center justify-center text-[10px] font-bold">SR</div><span class="text-[13px]">Sneha Reddy • Earned Leave</span></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Right Column -->
+          <div class="col-span-12 lg:col-span-4 space-y-5">
+            <!-- Clock In Card -->
+            <div class="keka-card p-6 bg-[#1e1f2b] text-white relative overflow-hidden">
+              <div class="absolute top-0 right-0 w-40 h-40 bg-[#584ac0]/20 rounded-full blur-[30px] -mr-10 -mt-10"></div>
+              <div class="relative">
+                <div class="flex justify-between items-start mb-6"><h3 class="font-display font-semibold">Time Tracker</h3><span class="text-xs px-2 py-1 rounded-full bg-white/10">General Shift • 09:30 - 18:30</span></div>
+                <div class="text-center py-4">
+                  <div id="liveClock" class="text-[36px] font-display font-bold tracking-tight">09:42:15 AM</div>
+                  <div id="liveDate" class="text-white/60 text-sm mt-1">Friday, 29 August 2026</div>
+                </div>
+                <div id="clockStatus" class="bg-white/10 rounded-xl p-3 flex items-center gap-3 mb-4"><div class="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div><span class="text-sm">You clocked in at <b>09:32 AM</b></span></div>
+                <div class="grid grid-cols-2 gap-3">
+                  <button id="btnClockIn" class="bg-white text-[#1e1f2b] font-semibold py-3 rounded-xl hover:bg-gray-100 transition flex items-center justify-center gap-2"><i class="fas fa-sign-in-alt"></i> Clock In</button>
+                  <button id="btnClockOut" class="bg-white/10 text-white font-semibold py-3 rounded-xl hover:bg-white/15 transition flex items-center justify-center gap-2"><i class="fas fa-sign-out-alt"></i> Clock Out</button>
+                </div>
+                <div class="mt-4 grid grid-cols-3 gap-3 text-center">
+                  <div class="bg-white/[0.06] rounded-xl py-3"><div class="text-lg font-bold">8.2h</div><div class="text-[11px] text-white/50 uppercase tracking-widest mt-1">Worked</div></div>
+                  <div class="bg-white/[0.06] rounded-xl py-3"><div class="text-lg font-bold">45m</div><div class="text-[11px] text-white/50 uppercase tracking-widest mt-1">Break</div></div>
+                  <div class="bg-white/[0.06] rounded-xl py-3"><div class="text-lg font-bold">--</div><div class="text-[11px] text-white/50 uppercase tracking-widest mt-1">Overtime</div></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Pending Approvals -->
+            <div class="keka-card p-6">
+              <div class="flex justify-between items-center mb-4"><h3 class="font-display font-semibold">Pending Actions</h3><span class="w-6 h-6 rounded-full bg-[#ff5a5a] text-white text-xs flex items-center justify-center font-bold">4</span></div>
+              <div class="space-y-3" id="pendingApprovals">
+                <!-- Filled by JS -->
+              </div>
+              <button class="w-full mt-4 py-2.5 rounded-xl bg-[#f6f7fb] text-sm font-medium hover:bg-[#eef0f6] transition">View all requests</button>
+            </div>
+
+            <!-- Quick Links -->
+            <div class="keka-card p-6">
+              <h3 class="font-display font-semibold mb-4">Quick Actions</h3>
+              <div class="grid grid-cols-3 gap-3">
+                <button onclick="switchModule('leave')" class="flex flex-col items-center gap-2 p-4 rounded-xl bg-[#f6f7fb] hover:bg-[#eef0ff] hover:text-[#584ac0] transition group"><div class="w-10 h-10 rounded-xl bg-white group-hover:bg-[#584ac0] group-hover:text-white flex items-center justify-center shadow-sm transition"><i class="far fa-calendar-plus"></i></div><span class="text-xs font-medium">Apply Leave</span></button>
+                <button onclick="switchModule('expenses')" class="flex flex-col items-center gap-2 p-4 rounded-xl bg-[#f6f7fb] hover:bg-[#eef0ff] hover:text-[#584ac0] transition group"><div class="w-10 h-10 rounded-xl bg-white group-hover:bg-[#584ac0] group-hover:text-white flex items-center justify-center shadow-sm transition"><i class="fas fa-receipt"></i></div><span class="text-xs font-medium">Expense</span></button>
+                <button onclick="switchModule('hiring')" class="flex flex-col items-center gap-2 p-4 rounded-xl bg-[#f6f7fb] hover:bg-[#eef0ff] hover:text-[#584ac0] transition group"><div class="w-10 h-10 rounded-xl bg-white group-hover:bg-[#584ac0] group-hover:text-white flex items-center justify-center shadow-sm transition"><i class="fas fa-user-plus"></i></div><span class="text-xs font-medium">Refer</span></button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ================= EMPLOYEES ================= -->
+      <div id="module-employees" class="module-section space-y-5">
+        <div class="flex justify-between items-center">
+          <div class="flex items-center gap-3">
+            <div class="relative"><i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-[#8b8fa3] text-sm"></i><input id="empSearch" placeholder="Search by name, email, ID..." class="pl-9 pr-4 py-2.5 w-[320px] rounded-xl border border-[#eef0f6] bg-white focus:border-[#584ac0] focus:ring-4 focus:ring-[#584ac0]/10 outline-none text-sm"></div>
+            <select id="deptFilter" class="px-4 py-2.5 rounded-xl border border-[#eef0f6] bg-white text-sm"><option value="All">All Departments</option><option>Engineering</option><option>Human Resources</option><option>Sales</option><option>Marketing</option><option>Finance</option><option>Design</option></select>
+            <select id="statusFilter" class="px-4 py-2.5 rounded-xl border border-[#eef0f6] bg-white text-sm"><option value="All">All Status</option><option>Active</option><option>On Leave</option><option>Probation</option></select>
+          </div>
+          <button onclick="openAddEmployeeModal()" class="bg-[#584ac0] text-white px-5 py-2.5 rounded-xl text-sm font-semibold hover:bg-[#4a3db0] transition flex items-center gap-2"><i class="fas fa-plus"></i> Add Employee</button>
+        </div>
+
+        <div class="keka-card overflow-hidden">
+          <div class="overflow-x-auto">
+            <table class="w-full">
+              <thead class="bg-[#f9fafe] border-b border-[#eef0f6] text-[11px] font-semibold tracking-widest text-[#8b8fa3] uppercase">
+                <tr><th class="text-left px-6 py-3.5">Employee</th><th class="text-left px-4 py-3.5">Department</th><th class="text-left px-4 py-3.5">Designation</th><th class="text-left px-4 py-3.5">Location</th><th class="text-left px-4 py-3.5">Status</th><th class="text-left px-4 py-3.5">Joining</th><th class="text-right px-6 py-3.5">Action</th></tr>
+              </thead>
+              <tbody id="employeesTable" class="divide-y divide-[#f0f0f5] text-[13.5px]"></tbody>
+            </table>
+          </div>
+          <div class="p-4 border-t border-[#eef0f6] flex justify-between items-center text-sm text-[#8b8fa3]"><span id="empCount">0 employees</span><div class="flex gap-2"><button class="px-3 py-1.5 rounded-full border">Prev</button><button class="px-3 py-1.5 rounded-full bg-[#1e1f2b] text-white">1</button><button class="px-3 py-1.5 rounded-full border">Next</button></div></div>
+        </div>
+      </div>
+
+      <!-- ================= ATTENDANCE ================= -->
+      <div id="module-attendance" class="module-section space-y-5">
+        <div class="grid grid-cols-12 gap-5">
+          <div class="col-span-8 keka-card p-6">
+            <div class="flex justify-between items-center mb-6"><h3 class="font-display font-semibold text-lg">Attendance Log • August 2026</h3><div class="flex gap-2"><button class="px-4 py-2 rounded-xl border text-sm">Export</button><button class="px-4 py-2 rounded-xl bg-[#1e1f2b] text-white text-sm">Regularize</button></div></div>
+            <div class="overflow-x-auto"><table class="w-full"><thead class="text-[11px] uppercase tracking-widest text-[#8b8fa3] border-b"><tr><th class="text-left py-3">Date</th><th class="text-left py-3">Clock In</th><th class="text-left py-3">Clock Out</th><th class="text-left py-3">Work Hours</th><th class="text-left py-3">Status</th><th class="text-left py-3">Action</th></tr></thead><tbody id="attendanceTable" class="text-[13px] divide-y"></tbody></table></div>
+          </div>
+          <div class="col-span-4 space-y-5">
+            <div class="keka-card p-6"><h4 class="font-semibold mb-4">This Month Summary</h4><div class="space-y-4"><div class="flex justify-between"><span class="text-sm text-[#8b8fa3]">Present</span><span class="font-semibold">22 days</span></div><div class="flex justify-between"><span class="text-sm text-[#8b8fa3]">Absent</span><span class="font-semibold">0 days</span></div><div class="flex justify-between"><span class="text-sm text-[#8b8fa3]">Late arrivals</span><span class="font-semibold text-amber-600">3 days</span></div><div class="flex justify-between"><span class="text-sm text-[#8b8fa3]">Avg work hrs</span><span class="font-semibold">8.4h</span></div><div class="w-full bg-[#f6f7fb] rounded-full h-2 mt-2"><div class="bg-[#584ac0] h-2 rounded-full" style="width:92%"></div></div></div></div>
+            <div class="keka-card p-6"><h4 class="font-semibold mb-3">Shift Details</h4><div class="bg-[#f6f7fb] rounded-xl p-4"><div class="font-medium">General Shift</div><div class="text-sm text-[#8b8fa3] mt-1">09:30 AM - 06:30 PM • 1h break</div><div class="text-xs mt-3 flex gap-2"><span class="px-2 py-1 rounded-full bg-white border">Mon-Fri</span><span class="px-2 py-1 rounded-full bg-white border">Weekend Off</span></div></div></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ================= LEAVE ================= -->
+      <div id="module-leave" class="module-section space-y-5">
+        <div class="grid grid-cols-5 gap-4" id="leaveBalances"></div>
+        <div class="grid grid-cols-12 gap-5">
+          <div class="col-span-8 keka-card p-6">
+            <div class="flex justify-between items-center mb-6"><h3 class="font-display font-semibold text-lg">Leave Requests</h3><button onclick="openLeaveModal()" class="bg-[#584ac0] text-white px-4 py-2 rounded-xl text-sm font-semibold">Apply Leave</button></div>
+            <div class="flex gap-2 mb-4"><button class="leave-tab active px-4 py-2 rounded-full text-sm font-medium bg-[#1e1f2b] text-white" data-status="All">All</button><button class="leave-tab px-4 py-2 rounded-full text-sm font-medium bg-[#f6f7fb]" data-status="Pending">Pending</button><button class="leave-tab px-4 py-2 rounded-full text-sm font-medium bg-[#f6f7fb]" data-status="Approved">Approved</button></div>
+            <div class="overflow-x-auto"><table class="w-full"><thead class="text-[11px] uppercase tracking-widest text-[#8b8fa3] border-b"><tr><th class="text-left py-3">Employee</th><th class="text-left py-3">Type</th><th class="text-left py-3">Dates</th><th class="text-left py-3">Days</th><th class="text-left py-3">Reason</th><th class="text-left py-3">Status</th><th class="text-right py-3">Action</th></tr></thead><tbody id="leaveTable" class="text-[13px] divide-y"></tbody></table></div>
+          </div>
+          <div class="col-span-4 keka-card p-6">
+            <h4 class="font-semibold mb-4">Team Calendar</h4>
+            <div class="grid grid-cols-7 gap-1 text-center text-xs mb-2 text-[#8b8fa3]"><span>Mo</span><span>Tu</span><span>We</span><span>Th</span><span>Fr</span><span>Sa</span><span>Su</span></div>
+            <div class="grid grid-cols-7 gap-1 text-center text-sm" id="miniCalendar"></div>
+            <div class="mt-6 space-y-2 text-xs"><div class="flex items-center gap-2"><span class="w-3 h-3 rounded-full bg-[#6c5ce7]"></span> Casual Leave</div><div class="flex items-center gap-2"><span class="w-3 h-3 rounded-full bg-[#00b894]"></span> Sick Leave</div><div class="flex items-center gap-2"><span class="w-3 h-3 rounded-full bg-[#fdcb6e]"></span> WFH</div></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ================= PAYROLL ================= -->
+      <div id="module-payroll" class="module-section space-y-5">
+        <div class="grid grid-cols-3 gap-4">
+          <div class="keka-card p-6"><div class="text-sm text-[#8b8fa3]">Total Payroll Cost</div><div class="text-2xl font-bold mt-2">₹42.5L</div><div class="text-xs text-green-600 mt-1">↑ 8% from last month</div></div>
+          <div class="keka-card p-6"><div class="text-sm text-[#8b8fa3]">Payslips Generated</div><div class="text-2xl font-bold mt-2">98/102</div><div class="w-full bg-[#f6f7fb] h-1.5 rounded-full mt-3"><div class="bg-[#584ac0] h-1.5 rounded-full" style="width:96%"></div></div></div>
+          <div class="keka-card p-6"><div class="text-sm text-[#8b8fa3]">Pending Reimbursements</div><div class="text-2xl font-bold mt-2">₹1.2L</div><div class="text-xs text-amber-600 mt-1">12 requests pending</div></div>
+        </div>
+        <div class="keka-card p-6">
+          <div class="flex justify-between items-center mb-6"><h3 class="font-display font-semibold text-lg">Payslips • August 2026</h3><div class="flex gap-2"><button class="px-4 py-2 rounded-xl border text-sm">Download All</button><button class="px-4 py-2 rounded-xl bg-[#584ac0] text-white text-sm">Run Payroll</button></div></div>
+          <div class="overflow-x-auto"><table class="w-full"><thead class="text-[11px] uppercase tracking-widest text-[#8b8fa3] border-b"><tr><th class="text-left py-3">Employee</th><th class="text-left py-3">Month</th><th class="text-left py-3">Gross</th><th class="text-left py-3">Deductions</th><th class="text-left py-3">Net Pay</th><th class="text-left py-3">Status</th><th class="text-right py-3">Action</th></tr></thead><tbody id="payslipTable" class="text-[13px] divide-y"></tbody></table></div>
+        </div>
+      </div>
+
+      <!-- ================= HIRING ================= -->
+      <div id="module-hiring" class="module-section space-y-5">
+        <div class="flex justify-between items-center"><h3 class="font-display font-semibold text-xl">Open Positions</h3><button onclick="openJobModal()" class="bg-[#584ac0] text-white px-5 py-2.5 rounded-xl text-sm font-semibold">+ New Job</button></div>
+        <div class="grid grid-cols-3 gap-4" id="jobsGrid"></div>
+        <div class="keka-card p-6"><h4 class="font-semibold mb-4">Candidate Pipeline</h4><div class="grid grid-cols-5 gap-4 text-center"><div class="bg-[#f6f7fb] rounded-xl p-4"><div class="text-2xl font-bold">24</div><div class="text-xs text-[#8b8fa3] mt-1 uppercase tracking-widest">Applied</div></div><div class="bg-[#eef0ff] rounded-xl p-4"><div class="text-2xl font-bold">12</div><div class="text-xs text-[#8b8fa3] mt-1 uppercase tracking-widest">Screening</div></div><div class="bg-[#fff4e6] rounded-xl p-4"><div class="text-2xl font-bold">8</div><div class="text-xs text-[#8b8fa3] mt-1 uppercase tracking-widest">Interview</div></div><div class="bg-[#e6f9f0] rounded-xl p-4"><div class="text-2xl font-bold">3</div><div class="text-xs text-[#8b8fa3] mt-1 uppercase tracking-widest">Offer</div></div><div class="bg-[#1e1f2b] text-white rounded-xl p-4"><div class="text-2xl font-bold">5</div><div class="text-xs text-white/60 mt-1 uppercase tracking-widest">Hired</div></div></div><div id="candidatesList" class="mt-6 space-y-3"></div></div>
+      </div>
+
+      <!-- ================= PERFORMANCE ================= -->
+      <div id="module-performance" class="module-section space-y-5">
+        <div class="grid grid-cols-12 gap-5">
+          <div class="col-span-8 space-y-5">
+            <div class="keka-card p-6"><div class="flex justify-between items-center mb-6"><h3 class="font-display font-semibold text-lg">My Goals & OKRs</h3><button class="px-4 py-2 rounded-xl bg-[#f6f7fb] text-sm">+ New Goal</button></div><div id="goalsList" class="space-y-4"></div></div>
+            <div class="keka-card p-6"><h3 class="font-display font-semibold mb-4">Performance Reviews</h3><div class="space-y-3"><div class="flex items-center justify-between p-4 rounded-xl bg-[#f6f7fb]"><div><div class="font-medium">Q2 2026 Review</div><div class="text-sm text-[#8b8fa3]">Reviewer: Priya Nair • Due: 15 Sep</div></div><span class="px-3 py-1 rounded-full bg-amber-100 text-amber-700 text-xs font-medium">In Review</span></div><div class="flex items-center justify-between p-4 rounded-xl bg-[#f6f7fb]"><div><div class="font-medium">Q1 2026 Review</div><div class="text-sm text-[#8b8fa3]">Rating: 4.2/5 • Completed</div></div><span class="px-3 py-1 rounded-full bg-green-100 text-green-700 text-xs font-medium">Completed</span></div></div></div>
+          </div>
+          <div class="col-span-4 keka-card p-6"><h4 class="font-semibold mb-4">Feedback</h4><div class="space-y-4"><div class="border border-[#eef0f6] rounded-xl p-4"><div class="flex gap-3"><div class="w-8 h-8 rounded-full bg-[#584ac0] text-white flex items-center justify-center text-xs font-bold">PN</div><div><div class="text-sm font-medium">Priya Nair</div><div class="text-xs text-[#8b8fa3]">Yesterday</div></div></div><div class="text-sm mt-3">Great work on the performance module launch! Your attention to detail is impressive.</div><div class="flex gap-2 mt-3"><span class="text-xs px-2 py-1 rounded-full bg-[#eef0ff] text-[#584ac0]">#teamwork</span><span class="text-xs px-2 py-1 rounded-full bg-[#e6f9f0] text-[#00b894]">#ownership</span></div></div></div><button class="w-full mt-4 py-2.5 rounded-xl bg-[#1e1f2b] text-white text-sm">Give Feedback</button></div>
+        </div>
+      </div>
+
+      <!-- ================= OTHER MODULES PLACEHOLDER ================= -->
+      <div id="module-me" class="module-section"><div class="keka-card p-12 text-center"><div class="w-20 h-20 rounded-full bg-[#1e1f2b] text-white flex items-center justify-center text-2xl font-bold mx-auto">AU</div><h3 class="font-display font-bold text-xl mt-4">Admin User</h3><p class="text-[#8b8fa3] mt-2">HR Admin • admin@company.com</p><div class="grid grid-cols-3 gap-4 max-w-xl mx-auto mt-8"><div class="bg-[#f6f7fb] rounded-xl p-4"><div class="font-bold text-lg">2.4 yrs</div><div class="text-xs text-[#8b8fa3] uppercase tracking-widest">At Company</div></div><div class="bg-[#f6f7fb] rounded-xl p-4"><div class="font-bold text-lg">12</div><div class="text-xs text-[#8b8fa3] uppercase tracking-widest">Leaves Left</div></div><div class="bg-[#f6f7fb] rounded-xl p-4"><div class="font-bold text-lg">4.6</div><div class="text-xs text-[#8b8fa3] uppercase tracking-widest">Rating</div></div></div></div></div>
+      <div id="module-inbox" class="module-section"><div class="keka-card p-6"><h3 class="font-semibold text-lg mb-4">Inbox (4 pending)</h3><div id="inboxList" class="space-y-3"></div></div></div>
+      <div id="module-orgchart" class="module-section"><div class="keka-card p-12 text-center"><i class="fas fa-sitemap text-4xl text-[#eef0f6] mb-4"></i><h3 class="font-semibold">Org Chart</h3><p class="text-sm text-[#8b8fa3] mt-2">Visual hierarchy of teams - Coming from Supabase org data</p></div></div>
+      <div id="module-documents" class="module-section"><div class="keka-card p-6"><h3 class="font-semibold mb-4">Documents</h3><div class="grid grid-cols-4 gap-4"><div class="border-2 border-dashed border-[#eef0f6] rounded-xl p-8 text-center hover:border-[#584ac0]/30 cursor-pointer transition"><i class="fas fa-cloud-upload-alt text-2xl text-[#8b8fa3] mb-2"></i><div class="text-sm font-medium">Upload Document</div></div></div></div></div>
+      <div id="module-timesheet" class="module-section"><div class="keka-card p-12 text-center"><h3 class="font-semibold">Timesheet Management</h3><p class="text-sm text-[#8b8fa3] mt-2">Log project hours, client billing, and timesheet approvals</p></div></div>
+      <div id="module-expenses" class="module-section space-y-5"><div class="flex justify-between items-center"><h3 class="font-semibold text-lg">Expenses & Reimbursements</h3><button class="bg-[#584ac0] text-white px-4 py-2 rounded-xl text-sm">+ New Expense</button></div><div class="keka-card p-6"><table class="w-full text-sm"><thead class="text-xs uppercase text-[#8b8fa3] border-b"><tr><th class="text-left py-3">Date</th><th class="text-left py-3">Category</th><th class="text-left py-3">Amount</th><th class="text-left py-3">Status</th></tr></thead><tbody id="expensesTable"></tbody></table></div></div>
+      <div id="module-reports" class="module-section"><div class="keka-card p-12 text-center"><i class="fas fa-chart-bar text-4xl text-[#eef0f6] mb-4"></i><h3 class="font-semibold">Reports & Analytics</h3><p class="text-sm text-[#8b8fa3] mt-2">Custom reports: Headcount, Attrition, Payroll, Attendance - All powered by Supabase views</p></div></div>
+
+    </main>
+  </div>
+</div>
+
+<!-- MODALS -->
+<!-- Add Employee Modal -->
+<div id="addEmployeeModal" class="fixed inset-0 bg-black/50 backdrop-blur-sm hidden items-center justify-center z-50 p-4">
+  <div class="bg-white rounded-[20px] w-full max-w-[560px] max-h-[90vh] overflow-hidden flex flex-col">
+    <div class="p-6 border-b border-[#eef0f6] flex justify-between items-center"><h3 class="font-display font-bold text-lg">Add New Employee</h3><button onclick="closeAddEmployeeModal()" class="w-8 h-8 rounded-full bg-[#f6f7fb] flex items-center justify-center"><i class="fas fa-times text-sm"></i></button></div>
+    <form id="addEmployeeForm" class="p-6 space-y-4 overflow-y-auto">
+      <div class="grid grid-cols-2 gap-4">
+        <div class="col-span-2"><label class="text-xs font-semibold uppercase tracking-widest text-[#8b8fa3]">Full Name *</label><input name="full_name" required class="mt-2 w-full px-4 py-3 rounded-xl border border-[#eef0f6] focus:border-[#584ac0] focus:ring-4 focus:ring-[#584ac0]/10 outline-none"></div>
+        <div><label class="text-xs font-semibold uppercase tracking-widest text-[#8b8fa3]">Email *</label><input name="email" type="email" required class="mt-2 w-full px-4 py-3 rounded-xl border border-[#eef0f6] focus:border-[#584ac0] outline-none"></div>
+        <div><label class="text-xs font-semibold uppercase tracking-widest text-[#8b8fa3]">Phone</label><input name="phone" class="mt-2 w-full px-4 py-3 rounded-xl border border-[#eef0f6] focus:border-[#584ac0] outline-none"></div>
+        <div><label class="text-xs font-semibold uppercase tracking-widest text-[#8b8fa3]">Department</label><select name="department_id" id="modalDeptSelect" class="mt-2 w-full px-4 py-3 rounded-xl border border-[#eef0f6] focus:border-[#584ac0] outline-none"></select></div>
+        <div><label class="text-xs font-semibold uppercase tracking-widest text-[#8b8fa3]">Designation</label><input name="designation" placeholder="e.g. Software Engineer" class="mt-2 w-full px-4 py-3 rounded-xl border border-[#eef0f6] focus:border-[#584ac0] outline-none"></div>
+        <div><label class="text-xs font-semibold uppercase tracking-widest text-[#8b8fa3]">Employment Type</label><select name="employment_type" class="mt-2 w-full px-4 py-3 rounded-xl border border-[#eef0f6]"><option>Full-time</option><option>Part-time</option><option>Contract</option><option>Intern</option></select></div>
+        <div><label class="text-xs font-semibold uppercase tracking-widest text-[#8b8fa3]">Location</label><input name="work_location" value="Bangalore" class="mt-2 w-full px-4 py-3 rounded-xl border border-[#eef0f6]"></div>
+        <div><label class="text-xs font-semibold uppercase tracking-widest text-[#8b8fa3]">Date of Joining</label><input name="date_of_joining" type="date" class="mt-2 w-full px-4 py-3 rounded-xl border border-[#eef0f6]"></div>
+        <div><label class="text-xs font-semibold uppercase tracking-widest text-[#8b8fa3]">CTC (Annual)</label><input name="salary_ctc" type="number" placeholder="1200000" class="mt-2 w-full px-4 py-3 rounded-xl border border-[#eef0f6]"></div>
+      </div>
+      <div class="flex gap-3 pt-4"><button type="button" onclick="closeAddEmployeeModal()" class="flex-1 py-3 rounded-xl border font-medium">Cancel</button><button type="submit" class="flex-1 py-3 rounded-xl bg-[#584ac0] text-white font-semibold">Add Employee</button></div>
+    </form>
+  </div>
+</div>
+
+<!-- Leave Modal -->
+<div id="leaveModal" class="fixed inset-0 bg-black/50 backdrop-blur-sm hidden items-center justify-center z-50 p-4">
+  <div class="bg-white rounded-[20px] w-full max-w-[480px]">
+    <div class="p-6 border-b flex justify-between items-center"><h3 class="font-bold text-lg">Apply Leave</h3><button onclick="closeLeaveModal()" class="w-8 h-8 rounded-full bg-[#f6f7fb] flex items-center justify-center"><i class="fas fa-times text-sm"></i></button></div>
+    <form id="leaveForm" class="p-6 space-y-4">
+      <div><label class="text-xs font-semibold uppercase tracking-widest text-[#8b8fa3]">Leave Type</label><select name="leave_type" id="leaveTypeSelect" class="mt-2 w-full px-4 py-3 rounded-xl border border-[#eef0f6]"></select></div>
+      <div class="grid grid-cols-2 gap-4"><div><label class="text-xs font-semibold uppercase tracking-widest text-[#8b8fa3]">Start Date</label><input name="start_date" type="date" required class="mt-2 w-full px-4 py-3 rounded-xl border border-[#eef0f6]"></div><div><label class="text-xs font-semibold uppercase tracking-widest text-[#8b8fa3]">End Date</label><input name="end_date" type="date" required class="mt-2 w-full px-4 py-3 rounded-xl border border-[#eef0f6]"></div></div>
+      <div><label class="text-xs font-semibold uppercase tracking-widest text-[#8b8fa3]">Reason</label><textarea name="reason" rows="3" class="mt-2 w-full px-4 py-3 rounded-xl border border-[#eef0f6] focus:border-[#584ac0] outline-none" placeholder="Brief reason..."></textarea></div>
+      <div class="flex gap-3 pt-2"><button type="button" onclick="closeLeaveModal()" class="flex-1 py-3 rounded-xl border font-medium">Cancel</button><button type="submit" class="flex-1 py-3 rounded-xl bg-[#584ac0] text-white font-semibold">Submit Request</button></div>
+    </form>
+  </div>
+</div>
+
+<script src="/static/js/app.js"></script>
+{% endblock %}
