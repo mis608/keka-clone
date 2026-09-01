@@ -18,6 +18,7 @@ document.addEventListener('DOMContentLoaded', () => {
   loadAnnouncements();
   loadGoals();
   setupSearchAndFilters();
+  setupForms();
 });
 
 function initNavigation() {
@@ -294,8 +295,9 @@ function setupSearchAndFilters() {
       loadLeave(tab.dataset.status);
     });
   });
+}
 
-  // Forms
+function setupForms() {
   document.getElementById('addEmployeeForm')?.addEventListener('submit', async (e) => {
     e.preventDefault();
     const fd = new FormData(e.target);
@@ -322,19 +324,63 @@ function setupSearchAndFilters() {
     e.preventDefault();
     const fd = new FormData(e.target);
     const payload = Object.fromEntries(fd.entries());
+    if (!payload.start_date || !payload.end_date) {
+      showToast('Please select leave dates', 'error');
+      return;
+    }
     const start = new Date(payload.start_date), end = new Date(payload.end_date);
-    const days = Math.ceil((end - start)/ (1000*60*60*24)) + 1;
-    payload.days = days;
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end < start) {
+      showToast('Please enter a valid date range', 'error');
+      return;
+    }
+
+    const selected = document.getElementById('leaveTypeSelect')?.selectedOptions[0];
+    payload.days = Math.ceil((end - start) / (1000 * 60 * 60 * 24)) + 1;
+    payload.employee_id = 'e1';
     payload.employee_name = 'Admin User';
-    payload.leave_type = document.getElementById('leaveTypeSelect').selectedOptions[0]?.text || 'Casual Leave';
+    payload.leave_type = selected?.value || 'Casual Leave';
+    payload.leave_type_id = selected?.value || 'Casual Leave';
+
     try {
-      await fetch('/api/leave-requests', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      const res = await fetch('/api/leave-requests', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Leave request failed');
       closeLeaveModal();
       loadLeave();
       loadDashboard();
       showToast('Leave applied successfully', 'success');
       e.target.reset();
-    } catch (err) { showToast('Failed to apply leave', 'error'); }
+    } catch (err) { showToast(err.message || 'Failed to apply leave', 'error'); }
+  });
+
+  document.getElementById('jobForm')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const payload = Object.fromEntries(fd.entries());
+    try {
+      const res = await fetch('/api/jobs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Job creation failed');
+      closeJobModal();
+      loadHiring();
+      loadDashboard();
+      showToast('Job published successfully', 'success');
+      e.target.reset();
+    } catch (err) { showToast(err.message || 'Failed to create job', 'error'); }
+  });
+
+  document.getElementById('expenseForm')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const payload = Object.fromEntries(fd.entries());
+    try {
+      const res = await fetch('/api/reimbursements', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Expense submission failed');
+      closeExpenseModal();
+      showToast('Expense submitted successfully', 'success');
+      e.target.reset();
+    } catch (err) { showToast(err.message || 'Failed to submit expense', 'error'); }
   });
 }
 
@@ -405,7 +451,7 @@ async function loadLeave(filterStatus = 'All') {
     // Leave type select
     const typeSelect = document.getElementById('leaveTypeSelect');
     if (typeSelect) {
-      typeSelect.innerHTML = typesRes.map(t => `<option value="${t.id}">${t.name} (${t.code}) - ${t.yearly_quota} days/year</option>`).join('');
+      typeSelect.innerHTML = typesRes.map(t => `<option value="${t.name}" data-code="${t.code}">${t.name} (${t.code}) - ${t.yearly_quota} days/year</option>`).join('');
     }
 
     // Mini calendar
@@ -545,9 +591,38 @@ window.openLeaveModal = openLeaveModal;
 window.closeLeaveModal = closeLeaveModal;
 
 function openJobModal() {
-  showToast('Job creation modal - Implement form similar to employee', 'info');
+  const modal = document.getElementById('jobModal');
+  if (modal) {
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+  }
+}
+function closeJobModal() {
+  const modal = document.getElementById('jobModal');
+  if (modal) {
+    modal.classList.add('hidden');
+    modal.classList.remove('flex');
+  }
 }
 window.openJobModal = openJobModal;
+window.closeJobModal = closeJobModal;
+
+function openExpenseModal() {
+  const modal = document.getElementById('expenseModal');
+  if (modal) {
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+  }
+}
+function closeExpenseModal() {
+  const modal = document.getElementById('expenseModal');
+  if (modal) {
+    modal.classList.add('hidden');
+    modal.classList.remove('flex');
+  }
+}
+window.openExpenseModal = openExpenseModal;
+window.closeExpenseModal = closeExpenseModal;
 
 // ---------- TOAST ----------
 function showToast(msg, type='info') {

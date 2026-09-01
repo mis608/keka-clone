@@ -347,7 +347,7 @@
       <div id="module-orgchart" class="module-section"><div class="keka-card p-12 text-center"><i class="fas fa-sitemap text-4xl text-[#eef0f6] mb-4"></i><h3 class="font-semibold">Org Chart</h3><p class="text-sm text-[#8b8fa3] mt-2">Visual hierarchy of teams - Coming from Supabase org data</p></div></div>
       <div id="module-documents" class="module-section"><div class="keka-card p-6"><h3 class="font-semibold mb-4">Documents</h3><div class="grid grid-cols-4 gap-4"><div class="border-2 border-dashed border-[#eef0f6] rounded-xl p-8 text-center hover:border-[#584ac0]/30 cursor-pointer transition"><i class="fas fa-cloud-upload-alt text-2xl text-[#8b8fa3] mb-2"></i><div class="text-sm font-medium">Upload Document</div></div></div></div></div>
       <div id="module-timesheet" class="module-section"><div class="keka-card p-12 text-center"><h3 class="font-semibold">Timesheet Management</h3><p class="text-sm text-[#8b8fa3] mt-2">Log project hours, client billing, and timesheet approvals</p></div></div>
-      <div id="module-expenses" class="module-section space-y-5"><div class="flex justify-between items-center"><h3 class="font-semibold text-lg">Expenses & Reimbursements</h3><button class="bg-[#584ac0] text-white px-4 py-2 rounded-xl text-sm">+ New Expense</button></div><div class="keka-card p-6"><table class="w-full text-sm"><thead class="text-xs uppercase text-[#8b8fa3] border-b"><tr><th class="text-left py-3">Date</th><th class="text-left py-3">Category</th><th class="text-left py-3">Amount</th><th class="text-left py-3">Status</th></tr></thead><tbody id="expensesTable"></tbody></table></div></div>
+      <div id="module-expenses" class="module-section space-y-5"><div class="flex justify-between items-center"><h3 class="font-semibold text-lg">Expenses & Reimbursements</h3><button onclick="openExpenseModal()" class="bg-[#584ac0] text-white px-4 py-2 rounded-xl text-sm">+ New Expense</button></div><div class="keka-card p-6"><table class="w-full text-sm"><thead class="text-xs uppercase text-[#8b8fa3] border-b"><tr><th class="text-left py-3">Date</th><th class="text-left py-3">Category</th><th class="text-left py-3">Amount</th><th class="text-left py-3">Status</th></tr></thead><tbody id="expensesTable"></tbody></table></div></div>
       <div id="module-reports" class="module-section"><div class="keka-card p-12 text-center"><i class="fas fa-chart-bar text-4xl text-[#eef0f6] mb-4"></i><h3 class="font-semibold">Reports & Analytics</h3><p class="text-sm text-[#8b8fa3] mt-2">Custom reports: Headcount, Attrition, Payroll, Attendance - All powered by Supabase views</p></div></div>
 
     </main>
@@ -385,6 +385,31 @@
       <div class="grid grid-cols-2 gap-4"><div><label class="text-xs font-semibold uppercase tracking-widest text-[#8b8fa3]">Start Date</label><input name="start_date" type="date" required class="mt-2 w-full px-4 py-3 rounded-xl border border-[#eef0f6]"></div><div><label class="text-xs font-semibold uppercase tracking-widest text-[#8b8fa3]">End Date</label><input name="end_date" type="date" required class="mt-2 w-full px-4 py-3 rounded-xl border border-[#eef0f6]"></div></div>
       <div><label class="text-xs font-semibold uppercase tracking-widest text-[#8b8fa3]">Reason</label><textarea name="reason" rows="3" class="mt-2 w-full px-4 py-3 rounded-xl border border-[#eef0f6] focus:border-[#584ac0] outline-none" placeholder="Brief reason..."></textarea></div>
       <div class="flex gap-3 pt-2"><button type="button" onclick="closeLeaveModal()" class="flex-1 py-3 rounded-xl border font-medium">Cancel</button><button type="submit" class="flex-1 py-3 rounded-xl bg-[#584ac0] text-white font-semibold">Submit Request</button></div>
+    </form>
+  </div>
+</div>
+
+<div id="jobModal" class="fixed inset-0 bg-black/50 backdrop-blur-sm hidden items-center justify-center z-50 p-4">
+  <div class="bg-white rounded-[20px] w-full max-w-[500px]">
+    <div class="p-6 border-b flex justify-between items-center"><h3 class="font-bold text-lg">Create New Job</h3><button onclick="closeJobModal()" class="w-8 h-8 rounded-full bg-[#f6f7fb] flex items-center justify-center"><i class="fas fa-times text-sm"></i></button></div>
+    <form id="jobForm" class="p-6 space-y-4">
+      <div><label class="text-xs font-semibold uppercase tracking-widest text-[#8b8fa3]">Job Title</label><input name="title" required class="mt-2 w-full px-4 py-3 rounded-xl border border-[#eef0f6] focus:border-[#584ac0] outline-none"></div>
+      <div class="grid grid-cols-2 gap-4"><div><label class="text-xs font-semibold uppercase tracking-widest text-[#8b8fa3]">Department</label><input name="department" value="Engineering" class="mt-2 w-full px-4 py-3 rounded-xl border border-[#eef0f6] focus:border-[#584ac0] outline-none"></div><div><label class="text-xs font-semibold uppercase tracking-widest text-[#8b8fa3]">Location</label><input name="location" value="Bangalore" class="mt-2 w-full px-4 py-3 rounded-xl border border-[#eef0f6] focus:border-[#584ac0] outline-none"></div></div>
+      <div class="grid grid-cols-2 gap-4"><div><label class="text-xs font-semibold uppercase tracking-widest text-[#8b8fa3]">Openings</label><input name="openings" type="number" min="1" value="1" class="mt-2 w-full px-4 py-3 rounded-xl border border-[#eef0f6] focus:border-[#584ac0] outline-none"></div><div><label class="text-xs font-semibold uppercase tracking-widest text-[#8b8fa3]">Status</label><select name="status" class="mt-2 w-full px-4 py-3 rounded-xl border border-[#eef0f6] focus:border-[#584ac0] outline-none"><option>Open</option><option>On Hold</option></select></div></div>
+      <div><label class="text-xs font-semibold uppercase tracking-widest text-[#8b8fa3]">Description</label><textarea name="description" rows="3" class="mt-2 w-full px-4 py-3 rounded-xl border border-[#eef0f6] focus:border-[#584ac0] outline-none"></textarea></div>
+      <div class="flex gap-3 pt-2"><button type="button" onclick="closeJobModal()" class="flex-1 py-3 rounded-xl border font-medium">Cancel</button><button type="submit" class="flex-1 py-3 rounded-xl bg-[#584ac0] text-white font-semibold">Publish Job</button></div>
+    </form>
+  </div>
+</div>
+
+<div id="expenseModal" class="fixed inset-0 bg-black/50 backdrop-blur-sm hidden items-center justify-center z-50 p-4">
+  <div class="bg-white rounded-[20px] w-full max-w-[440px]">
+    <div class="p-6 border-b flex justify-between items-center"><h3 class="font-bold text-lg">Submit Expense</h3><button onclick="closeExpenseModal()" class="w-8 h-8 rounded-full bg-[#f6f7fb] flex items-center justify-center"><i class="fas fa-times text-sm"></i></button></div>
+    <form id="expenseForm" class="p-6 space-y-4">
+      <div><label class="text-xs font-semibold uppercase tracking-widest text-[#8b8fa3]">Category</label><select name="category" class="mt-2 w-full px-4 py-3 rounded-xl border border-[#eef0f6] focus:border-[#584ac0] outline-none"><option>Travel</option><option>Food</option><option>Internet</option><option>Medical</option><option>Office Supplies</option></select></div>
+      <div class="grid grid-cols-2 gap-4"><div><label class="text-xs font-semibold uppercase tracking-widest text-[#8b8fa3]">Amount</label><input name="amount" type="number" min="1" required class="mt-2 w-full px-4 py-3 rounded-xl border border-[#eef0f6] focus:border-[#584ac0] outline-none"></div><div><label class="text-xs font-semibold uppercase tracking-widest text-[#8b8fa3]">Date</label><input name="date" type="date" required class="mt-2 w-full px-4 py-3 rounded-xl border border-[#eef0f6] focus:border-[#584ac0] outline-none"></div></div>
+      <div><label class="text-xs font-semibold uppercase tracking-widest text-[#8b8fa3]">Description</label><textarea name="description" rows="3" class="mt-2 w-full px-4 py-3 rounded-xl border border-[#eef0f6] focus:border-[#584ac0] outline-none"></textarea></div>
+      <div class="flex gap-3 pt-2"><button type="button" onclick="closeExpenseModal()" class="flex-1 py-3 rounded-xl border font-medium">Cancel</button><button type="submit" class="flex-1 py-3 rounded-xl bg-[#584ac0] text-white font-semibold">Submit</button></div>
     </form>
   </div>
 </div>
