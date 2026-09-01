@@ -416,25 +416,48 @@ def api_attendance():
 @app.route('/api/leave-requests', methods=['GET', 'POST'])
 def api_leave_requests():
     if request.method == 'POST':
-        data = request.get_json()
+        data = request.get_json(silent=True) or {}
+        start_date = (data.get('start_date') or '').strip()
+        end_date = (data.get('end_date') or '').strip()
+        if not start_date or not end_date:
+            return api_error("Start date and end date are required")
+
+        try:
+            start_dt = datetime.strptime(start_date, '%Y-%m-%d').date()
+            end_dt = datetime.strptime(end_date, '%Y-%m-%d').date()
+            if end_dt < start_dt:
+                return api_error("End date must be on or after start date")
+            days = int(data.get('days') or (end_dt - start_dt).days + 1)
+        except ValueError:
+            return api_error("Invalid date format. Use YYYY-MM-DD")
+
+        employee_id = data.get('employee_id') or 'e1'
+        employees = get_supabase_data('employees')
+        employee = next((e for e in employees if e.get('id') == employee_id), None)
+        employee_name = (data.get('employee_name') or (employee.get('full_name') if employee else 'Current User')).strip() or 'Current User'
+
+        leave_type_value = (data.get('leave_type') or 'Casual Leave').strip()
+        leave_type_name = leave_type_value.split(' (')[0].strip() or 'Casual Leave'
+
         payload = {
-            "employee_id": data.get('employee_id', 'e1'),
-            "leave_type_id": data.get('leave_type_id'),
-            "start_date": data.get('start_date'),
-            "end_date": data.get('end_date'),
-            "days": data.get('days', 1),
-            "reason": data.get('reason'),
+            "employee_id": employee_id,
+            "leave_type_id": data.get('leave_type_id') or leave_type_name,
+            "start_date": start_date,
+            "end_date": end_date,
+            "days": days,
+            "reason": (data.get('reason') or '').strip(),
             "status": "Pending"
         }
-        # For mock, add readable fields
+
         if not supabase:
             payload["id"] = str(uuid.uuid4())[:8]
-            payload["employee_name"] = data.get('employee_name', 'Current User')
-            payload["leave_type"] = data.get('leave_type', 'Casual Leave')
+            payload["employee_name"] = employee_name
+            payload["leave_type"] = leave_type_name
             payload["applied_at"] = str(date.today())
+
         result = insert_supabase_data("leave_requests", payload)
         return jsonify(result or payload)
-    
+
     status_filter = request.args.get('status')
     data = get_supabase_data("leave_requests")
     if status_filter and status_filter != 'All':
