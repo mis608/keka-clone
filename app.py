@@ -53,6 +53,14 @@ if SUPABASE_URL and not USE_MOCK:
 else:
     print("⚠️ Using MOCK DATA (Supabase disabled or USE_MOCK_DATA=true). Set SUPABASE_URL and SUPABASE_KEY in .env to use real DB")
 
+# ---------------- ADMIN ACCESS CONTROL ----------------
+# Only emails listed in ADMIN_EMAILS (comma-separated) can sign in.
+# Password must equal ADMIN_PASSWORD (set these on Render to lock the dashboard).
+ADMIN_EMAILS = {e.strip().lower() for e in os.getenv("ADMIN_EMAILS", "admin@company.com").split(",") if e.strip()}
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "demo123")
+if not os.getenv("ADMIN_EMAILS") or ADMIN_PASSWORD == "demo123":
+    print("[WARN] Admin access using DEFAULT credentials (ADMIN_EMAILS=admin@company.com / ADMIN_PASSWORD=demo123). Set ADMIN_EMAILS and ADMIN_PASSWORD env vars to restrict access.")
+
 # ---------------- MOCK DATA STORE (Fallback when Supabase not configured) ----------------
 mock_db = {
     "departments": [
@@ -225,11 +233,35 @@ def resolve_department_id(department_id):
 def login_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
-        # For demo, allow all - in production check session
-        # if 'user' not in session:
-        #     return redirect(url_for('login'))
+        if 'user' not in session:
+            return redirect(url_for('login'))
         return f(*args, **kwargs)
     return decorated
+
+
+def admin_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        user = session.get('user')
+        if not user:
+            if request.path.startswith('/api/') or request.is_json:
+                return jsonify({"success": False, "error": "Authentication required"}), 401
+            return redirect(url_for('login'))
+        if user.get('role') != 'HR Admin':
+            if request.path.startswith('/api/') or request.is_json:
+                return jsonify({"success": False, "error": "Admin access required"}), 403
+            return redirect(url_for('dashboard'))
+        return f(*args, **kwargs)
+    return decorated
+
+
+# Lock down all /api/* endpoints (except health) to logged-in users..
+# This stops anyone with the raw link from reading or writing data via the API.
+@app.before_request
+def require_auth_for_api():
+    if request.path.startswith('/api/') and request.path != '/api/health':
+        if 'user' not in session:
+            return jsonify({"success": False, "error": "Authentication required — please log in"}), 401
 
 # ---------------- ROUTES ----------------
 @app.route('/')
@@ -248,11 +280,28 @@ def login():
         # For Supabase Auth:
         # if supabase:
         #   res = supabase.auth.sign_in_with_password({"email": email, "password": password})
+        email = (data.get('email') or '' ).strip().lower()
+        password = data.get('password') or ''
+        # Restrict login to allowlisted admin emails + known password
+        if email not in ADMIN_EMAILS or password != ADMIN_PASSWORD:
+            if request.is_json:
+                return jsonify({"success": False, "error": "Access restricted — invalid email or password. Only authorized admins can sign in."}), 401
+            flash("Access restricted — invalid email or password", "error")
+            return redirect(url_for('login'))
+        name, avatar = "Admin User", "AU"
+        try:
+            emp = next((e for e in get_supabase_data("employees") if (e.get('email') or '' ).lower() == email), None)
+            if emp:
+                name = emp.get('full_name') or name
+                initials = ''.join([w[0] for w in name.split() if w])[:2].upper()
+                avatar = initials or "AU"
+        except Exception:
+            pass
         session['user'] = {
-            "email": email or "admin@company.com",
-            "name": "Admin User",
+            "email": email,
+            "name": name,
             "role": "HR Admin",
-            "avatar": "AU"
+            "avatar": avatar
         }
         if request.is_json:
             return jsonify({"success": True, "redirect": "/dashboard"})
@@ -805,6 +854,6 @@ if __name__ == '__main__':
     API Health: http://localhost:{port}/api/health
     Supabase: {'Connected ✅' if supabase else 'Mock Mode ⚠️ (Set .env to enable Supabase)'}
     ---------------------------------
-    Demo Login: any email + any password
+    Login: Restricted — only emails in ADMIN_EMAILS (+ ADMIN_PASSWORD) can sign in
     """)
     app.run(host='0.0.0.0', port=port, debug=True)
