@@ -77,6 +77,7 @@ function switchModule(mod) {
   if (mod === 'expenses') loadExpenses();
   if (mod === 'performance') loadGoals();
   if (mod === 'inbox') loadDashboard();
+  if (mod === 'orgchart') loadOrgChart();
 }
 window.switchModule = switchModule;
 
@@ -102,6 +103,66 @@ function setupExtraUI() {
   }
 }
 
+
+// ---------- ORG CHART ----------
+async function loadOrgChart() {
+  const el = document.getElementById('orgChartContainer');
+  if (!el) return;
+  const countEl = document.getElementById('orgChartCount');
+  try {
+    const res = await fetch('/api/employees').then(r => r.json());
+    const emps = Array.isArray(res) ? res : [];
+    const byId = new Map();
+    const byName = new Map();
+    emps.forEach(e => {
+      const id = String(e.id || '');
+      byId.set(id, e)
+      const nm = (e.full_name || '' ).trim().toLowerCase();
+      if (nm) byName.set(nm, id)
+    });
+    emps.forEach(e => {
+      let mid = e.manager_id ? String(e.manager_id) : '';
+      if (!mid) mid = (e.manager || '' ).trim().toLowerCase();
+      if (mid === '-' ) mid = '';
+      if (mid && !byId.has(mid)) mid = byName.get(mid) || '';
+      const self = String(e.id || '' );
+      if (mid === self) mid = '';
+      e._mgrId = mid;
+    });
+    const childrenOf = new Map();
+    emps.forEach(e => {
+      if (e._mgrId) {
+        if (!childrenOf.has(e._mgrId)) childrenOf.set(e._mgrId, []);
+        childrenOf.get(e._mgrId).push(e)
+      }
+    });
+    const roots = emps.filter(e => !e._mgrId || !byId.has(e._mgrId))
+    const initials = (n) => {
+      const ini = (n || '?' ).trim().split(/\s+/).map(w => w[0] || '' ).join('').slice(0, 2);
+      return ini.toUpperCase() || '?';
+    };
+    const card = (e) => `
+      <div class="flex items-center gap-3 p-3 rounded-xl border border-[#eef0f6] bg-white shadow-sm min-w-[210px]">
+        <div class="w-11 h-11 shrink-0 rounded-xl bg-[#eef0ff] text-[#584ac0] flex items-center justify-center font-bold text-xs">${initials(e.full_name)}</div>
+        <div class="min-w-0">
+          <div class="text-[13px] font-semibold truncate">${e.full_name || 'Employee'}</div>
+          <div class="text-[11px] text-[#8b8fa3] truncate">${e.designation || e.designation_id || ''}</div>
+          <div class="mt-1 flex items-center gap-1"><span class="text-[10px] px-2 py-0.5 rounded-full ${e.status==='Active'?'bg-[#e6f9f0] text-[#00b894]': e.status==='On Leave'?'bg-[#fff4e6] text-[#e17055]':'bg-[#f6f7fb] text-[#8b8fa3]'}">${e.status || 'Active'}</span>${e.department ? `<span class="text-[10px] px-2 py-0.5 rounded-full bg-[#f6f7fb] text-[#584ac0]">${e.department}</span>` : ''}</div>
+        </div>
+      </div>`;
+    const renderNode = (e, depth) => {
+      const kids = depth < 6 ? (childrenOf.get(String(e.id || '' )) || []) : [];
+      return `<li>
+        ${card(e)}
+        ${kids.length ? `<ul class="border-l-2 border-[#eef0f6] ml-5 pl-5 mt-3 space-y-3">${kids.map(k => renderNode(k, depth + 1)).join('')}</ul>` : ''}
+      </li>`;
+    };
+    const trees = roots.map(r => renderNode(r, 0))
+    el.innerHTML = trees.length ? `<ul class="space-y-4">${trees.join('')}</ul>` : '<div class="text-center text-sm text-[#8b8fa3] py-10">No employees to display yet.</div>';
+    if (countEl) countEl.textContent = `${emps.length} employees • ${roots.length} top-level team(s)`;
+  } catch (err) { console.error('Org chart error', err); el.innerHTML = '<div class="text-center text-sm text-[#ff5a5a] py-10">Failed to load org chart</div>'; }
+}
+window.loadOrgChart = loadOrgChart;
 
 // ---------- CLOCK ----------
 function initClock() {
