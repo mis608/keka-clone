@@ -1,0 +1,26 @@
+=== START 13:40:26 ===
+static\img\ekkaa-logo-full.png 65825B
+static\img\ekkaa-mark.png 11821B
+static\img\favicon.png 3176B
+deploy-ready\static\img\ekkaa-logo-full.png 65825B
+deploy-ready\static\img\ekkaa-mark.png 11821B
+deploy-ready\static\img\favicon.png 3176B
+SERVER UP: True
+HTTP ekkaa-logo-full.png -> 200 image/png
+HTTP ekkaa-mark.png -> 200 image/png
+HTTP favicon.png -> 200 image/png
+DASH mark=True favicon=True title=<title>Dashboard - Ekkaa HRMS</title>
+LOGIN full=False mark=True favicon=True
+=== PIXELS ===
+<string>:1: DeprecationWarning: Image.Image.getdata is deprecated and will be removed in Pillow 14 (2027-10-15). Use get_flattened_data instead.
+ekkaa-logo-full.png (640, 513) transparent=85.1%
+<string>:1: DeprecationWarning: Image.Image.getdata is deprecated and will be removed in Pillow 14 (2027-10-15). Use get_flattened_data instead.
+ekkaa-mark.png (289, 289) transparent=70.1%
+<string>:1: DeprecationWarning: Image.Image.getdata is deprecated and will be removed in Pillow 14 (2027-10-15). Use get_flattened_data instead.
+favicon.png (64, 64) transparent=64.4%
+=== TESTS ===
+==============================
+RESULT: 34 passed, 0 failed
+==============================
+PORT: FREE
+=== DONE ===

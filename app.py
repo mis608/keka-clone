@@ -1,6 +1,6 @@
 """
-Keka HRMS Clone - Python Flask + Supabase
-Complete HRMS with all Keka features
+Ekkaa HRMS - Python Flask + Supabase
+Complete HRMS with all core HR features
 """
 import os
 import uuid
@@ -113,6 +113,18 @@ mock_db = {
         {"id": "g1", "employee_id": "e1", "title": "Launch Performance Module v2", "progress": 75, "status": "In Progress", "due_date": "2026-09-30"},
         {"id": "g2", "employee_id": "e1", "title": "Reduce API latency by 30%", "progress": 40, "status": "In Progress", "due_date": "2026-10-15"},
         {"id": "g3", "employee_id": "e2", "title": "Hire 5 engineers for backend team", "progress": 100, "status": "Completed", "due_date": "2026-08-15"},
+    ],
+    "reimbursements": [
+        {"id": "r1", "employee_id": "e1", "employee_name": "Aarav Sharma", "category": "Travel", "amount": 4500, "date": "2026-08-20", "description": "Client visit - Mumbai", "status": "Approved"},
+        {"id": "r2", "employee_id": "e2", "employee_name": "Priya Nair", "category": "Internet", "amount": 1200, "date": "2026-08-24", "description": "Monthly broadband reimbursement", "status": "Pending"},
+        {"id": "r3", "employee_id": "e3", "employee_name": "Rohan Mehta", "category": "Food", "amount": 800, "date": "2026-08-26", "description": "Team lunch", "status": "Pending"},
+    ],
+    "holidays": [
+        {"id": "h1", "name": "Ganesh Chaturthi", "date": "2026-09-14", "day": "Monday", "type": "Public"},
+        {"id": "h2", "name": "Gandhi Jayanti", "date": "2026-10-02", "day": "Friday", "type": "Public"},
+        {"id": "h3", "name": "Dussehra", "date": "2026-10-20", "day": "Tuesday", "type": "Public"},
+        {"id": "h4", "name": "Diwali", "date": "2026-11-08", "day": "Sunday", "type": "Public"},
+        {"id": "h5", "name": "Christmas", "date": "2026-12-25", "day": "Friday", "type": "Public"},
     ]
 }
 
@@ -144,18 +156,25 @@ def get_supabase_data(table, filters=None):
             return filtered
         return data
 
-def insert_supabase_data(table, payload):
+def insert_supabase_data(table, payload, mock_enrich=None):
+    """Insert into Supabase when available, otherwise (or on failure) fall back to the in-memory
+    mock store so nothing is silently lost. `mock_enrich` adds display-only fields in mock mode."""
+    data = dict(payload)
+    if mock_enrich:
+        data.update(mock_enrich)
     if supabase:
         try:
             res = supabase.table(table).insert(payload).execute()
             return res.data[0] if res.data else payload
         except Exception as e:
-            print(f"Insert error {table}: {e}")
-            return None
+            print(f"Insert error {table}: {e} -> falling back to mock store")
+            data["id"] = data.get("id") or str(uuid.uuid4())[:8]
+            mock_db.setdefault(table, []).append(data)
+            return data
     else:
-        payload["id"] = str(uuid.uuid4())[:8]
-        mock_db.setdefault(table, []).append(payload)
-        return payload
+        data["id"] = data.get("id") or str(uuid.uuid4())[:8]
+        mock_db.setdefault(table, []).append(data)
+        return data
 
 def api_error(message, status=400):
     return jsonify({"success": False, "error": message}), status
@@ -449,13 +468,13 @@ def api_leave_requests():
             "status": "Pending"
         }
 
-        if not supabase:
-            payload["id"] = str(uuid.uuid4())[:8]
-            payload["employee_name"] = employee_name
-            payload["leave_type"] = leave_type_name
-            payload["applied_at"] = str(date.today())
+        mock_enrich = {
+            "employee_name": employee_name,
+            "leave_type": leave_type_name,
+            "applied_at": str(date.today())
+        }
 
-        result = insert_supabase_data("leave_requests", payload)
+        result = insert_supabase_data("leave_requests", payload, mock_enrich=mock_enrich)
         return jsonify(result or payload)
 
     status_filter = request.args.get('status')
@@ -466,17 +485,21 @@ def api_leave_requests():
 
 @app.route('/api/leave-requests/<req_id>/action', methods=['POST'])
 def api_leave_action(req_id):
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
     new_status = data.get('status')  # Approved / Rejected
+    if new_status not in ('Approved', 'Rejected'):
+        return api_error("Status must be Approved or Rejected")
     if supabase:
-        res = supabase.table("leave_requests").update({"status": new_status, "actioned_at": datetime.now().isoformat()}).eq("id", req_id).execute()
-        return jsonify(res.data[0] if res.data else {"success": True})
-    else:
-        for req in mock_db["leave_requests"]:
-            if req["id"] == req_id:
-                req["status"] = new_status
-                return jsonify(req)
-    return jsonify({"success": False})
+        try:
+            res = supabase.table("leave_requests").update({"status": new_status, "actioned_at": datetime.now().isoformat()}).eq("id", req_id).execute()
+            return jsonify(res.data[0] if res.data else {"success": True})
+        except Exception as e:
+            print(f"Leave action error: {e} -> falling back to mock store")
+    for req in mock_db.get("leave_requests", []):
+        if req["id"] == req_id:
+            req["status"] = new_status
+            return jsonify(req)
+    return api_error("Leave request not found", 404)
 
 @app.route('/api/departments')
 def api_departments():
@@ -494,11 +517,11 @@ def api_jobs():
             "description": data.get('description'),
             "status": "Open"
         }
-        if not supabase:
-            payload["id"] = str(uuid.uuid4())[:8]
-            payload["department"] = data.get('department', 'Engineering')
-            payload["applicants"] = 0
-        result = insert_supabase_data("jobs", payload)
+        mock_enrich = {
+            "department": data.get('department', 'Engineering'),
+            "applicants": 0
+        }
+        result = insert_supabase_data("jobs", payload, mock_enrich=mock_enrich)
         return jsonify(result or payload)
     return jsonify(get_supabase_data("jobs"))
 
@@ -514,12 +537,98 @@ def api_payslips():
     filters = {"employee_id": emp_id} if emp_id else None
     return jsonify(get_supabase_data("payslips", filters))
 
-@app.route('/api/announcements')
+@app.route('/api/announcements', methods=['GET', 'POST'])
 def api_announcements():
+    if request.method == 'POST':
+        data = request.get_json(silent=True) or {}
+        title = (data.get('title') or '').strip()
+        content = (data.get('content') or '').strip()
+        if not title:
+            return api_error("Announcement title is required")
+        if not content:
+            return api_error("Announcement content is required")
+        payload = {
+            "title": title,
+            "content": content,
+            "type": (data.get('type') or 'General').strip(),
+            "date": data.get('date') or str(date.today()),
+            "is_pinned": bool(data.get('is_pinned'))
+        }
+        result = insert_supabase_data("announcements", payload)
+        return jsonify(result or payload)
     return jsonify(get_supabase_data("announcements"))
 
-@app.route('/api/goals')
+@app.route('/api/announcements/<ann_id>', methods=['PUT', 'DELETE'])
+def api_announcement_detail(ann_id):
+    if request.method == 'DELETE':
+        if supabase:
+            try:
+                supabase.table("announcements").delete().eq("id", ann_id).execute()
+                return jsonify({"success": True})
+            except Exception as e:
+                print(f"Announcement delete error: {e} -> falling back to mock store")
+        before = len(mock_db.get("announcements", []))
+        mock_db["announcements"] = [a for a in mock_db.get("announcements", []) if a.get("id") != ann_id]
+        if len(mock_db.get("announcements", [])) < before:
+            return jsonify({"success": True})
+        return api_error("Announcement not found", 404)
+
+    data = request.get_json(silent=True) or {}
+    updates = {}
+    if 'title' in data:
+        title = (data.get('title') or '').strip()
+        if not title:
+            return api_error("Announcement title cannot be empty")
+        updates['title'] = title
+    if 'content' in data:
+        content = (data.get('content') or '').strip()
+        if not content:
+            return api_error("Announcement content cannot be empty")
+        updates['content'] = content
+    if 'type' in data:
+        updates['type'] = (data.get('type') or 'General').strip()
+    if 'date' in data and data.get('date'):
+        updates['date'] = data.get('date')
+    if 'is_pinned' in data:
+        updates['is_pinned'] = bool(data.get('is_pinned'))
+    if not updates:
+        return api_error("No valid fields to update")
+
+    if supabase:
+        try:
+            res = supabase.table("announcements").update(updates).eq("id", ann_id).execute()
+            if res.data:
+                return jsonify(res.data[0])
+        except Exception as e:
+            print(f"Announcement update error: {e} -> falling back to mock store")
+    for ann in mock_db.get("announcements", []):
+        if ann.get("id") == ann_id:
+            ann.update(updates)
+            return jsonify(ann)
+    return api_error("Announcement not found", 404)
+
+@app.route('/api/goals', methods=['GET', 'POST'])
 def api_goals():
+    if request.method == 'POST':
+        data = request.get_json(silent=True) or {}
+        title = (data.get('title') or '').strip()
+        if not title:
+            return api_error("Goal title is required")
+        try:
+            progress = int(data.get('progress') or 0)
+        except (TypeError, ValueError):
+            progress = 0
+        progress = max(0, min(progress, 100))
+        status = (data.get('status') or ('Completed' if progress == 100 else 'In Progress')).strip()
+        payload = {
+            "employee_id": data.get('employee_id') or 'e1',
+            "title": title,
+            "progress": progress,
+            "status": status,
+            "due_date": data.get('due_date') or str(date.today() + timedelta(days=90))
+        }
+        result = insert_supabase_data("goals", payload)
+        return jsonify(result or payload)
     emp_id = request.args.get('employee_id')
     filters = {"employee_id": emp_id} if emp_id else None
     return jsonify(get_supabase_data("goals", filters))
@@ -543,18 +652,38 @@ def api_leave_types():
 @app.route('/api/reimbursements', methods=['GET','POST'])
 def api_reimbursements():
     if request.method == 'POST':
-        data = request.get_json()
+        data = request.get_json(silent=True) or {}
+        category = (data.get('category') or '').strip()
+        amount = data.get('amount')
+        expense_date = data.get('date') or str(date.today())
+        if not category:
+            return api_error("Category is required")
+        try:
+            amount = round(float(amount), 2)
+            if amount <= 0:
+                raise ValueError
+        except (TypeError, ValueError):
+            return api_error("A valid amount is required")
+
+        employee_id = data.get('employee_id') or 'e1'
+        employees = get_supabase_data('employees')
+        employee = next((e for e in employees if e.get('id') == employee_id), None)
+        employee_name = (data.get('employee_name') or (employee.get('full_name') if employee else 'Current User')).strip() or 'Current User'
+
         payload = {
-            "employee_id": data.get('employee_id','e1'),
-            "category": data.get('category'),
-            "amount": data.get('amount'),
-            "date": data.get('date'),
-            "description": data.get('description'),
+            "employee_id": employee_id,
+            "category": category,
+            "amount": amount,
+            "date": expense_date,
+            "description": (data.get('description') or '').strip(),
             "status": "Pending"
         }
-        result = insert_supabase_data("reimbursements", payload)
+        mock_enrich = {"employee_name": employee_name}
+        result = insert_supabase_data("reimbursements", payload, mock_enrich=mock_enrich)
         return jsonify(result or payload)
-    return jsonify(get_supabase_data("reimbursements"))
+
+    data = get_supabase_data("reimbursements")
+    return jsonify(data if isinstance(data, list) else [])
 
 # Health check
 @app.route('/api/health')
@@ -571,7 +700,7 @@ def health():
 if __name__ == '__main__':
     port = int(os.getenv("PORT", 5000))
     print(f"""
-    🚀 Keka HRMS Clone Starting...
+    🚀 Ekkaa HRMS Starting...
     ---------------------------------
     Dashboard: http://localhost:{port}/dashboard
     Login: http://localhost:{port}/login

@@ -1,4 +1,4 @@
-# ✅ Complete Code Checklist - Keka HRMS Clone
+# ✅ Complete Code Checklist - Ekkaa HRMS
 
 ## You Have ALL Files Needed - 100% Complete
 
@@ -9,8 +9,8 @@
 - [x] `requirements.txt` - All Python dependencies
 - [x] `supabase_schema.sql` (322 lines) - Complete DB schema with 18 tables + seed data + RLS policies
 
-### Frontend (Keka Pixel-Perfect UI)
-- [x] `templates/base.html` - Base layout with Tailwind config, Keka colors
+### Frontend (Pixel-Perfect UI)
+- [x] `templates/base.html` - Base layout with Tailwind config, brand colors
 - [x] `templates/login.html` - Login with dark branding, demo credentials hint
 - [x] `templates/dashboard.html` (393 lines) - Full SPA with 13 modules
 - [x] `static/js/app.js` (553 lines) - All JS logic: charts, API calls, modals, clock

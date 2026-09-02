@@ -1,7 +1,7 @@
 #!/bin/bash
-# Quick run script for Keka HRMS Clone
+# Quick run script for Ekkaa HRMS
 
-echo "🚀 Starting Keka HRMS Clone..."
+echo "🚀 Starting Ekkaa HRMS..."
 
 # Check venv
 if [ ! -d "venv" ]; then

@@ -1,4 +1,4 @@
--- Keka HRMS Clone - Supabase Schema
+-- Ekkaa HRMS - Supabase Schema
 -- Run this in Supabase SQL Editor
 
 -- Enable UUID extension

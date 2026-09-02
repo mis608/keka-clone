@@ -1,5 +1,5 @@
 """
-Central config for Keka HRMS Clone
+Central config for Ekkaa HRMS
 """
 import os
 from dotenv import load_dotenv
@@ -13,7 +13,7 @@ class Config:
     USE_MOCK = os.getenv("USE_MOCK_DATA", "false").lower() == "true"
     PORT = int(os.getenv("PORT", 5000))
     
-    # Keka specific
+    # App specific
     COMPANY_NAME = "Ekkaa HRMS"
     DEFAULT_SHIFT = "General Shift"
     LEAVE_YEAR = 2026

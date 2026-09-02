@@ -1,12 +1,12 @@
-# Keka HRMS Clone - Python + Supabase
+# Ekkaa HRMS - Python + Supabase
 
-A complete, production-ready clone of **Keka HRMS** built with **Python Flask** and **Supabase**. Pixel-perfect Keka UI with all major modules.
+A complete, production-ready HRMS built with **Python Flask** and **Supabase**. Modern, clean UI with all major HR modules.
 
-![Keka Clone](https://img.shields.io/badge/Stack-Flask%20%2B%20Supabase-584ac0) ![Python](https://img.shields.io/badge/Python-3.10%2B-blue) ![License](https://img.shields.io/badge/License-MIT-green)
+![Ekkaa HRMS](https://img.shields.io/badge/Stack-Flask%20%2B%20Supabase-584ac0) ![Python](https://img.shields.io/badge/Python-3.10%2B-blue) ![License](https://img.shields.io/badge/License-MIT-green)
 
 ---
 
-## ✨ Features - 100% Keka Parity
+## ✨ Features - Complete HRMS Suite
 
 ### 1. **Dashboard / Home**
 - Live clock in/out widget
@@ -86,7 +86,7 @@ keka-hrms-clone/
 ├── supabase_schema.sql    # Full DB schema (run in Supabase SQL editor)
 ├── templates/
 │   ├── base.html          # Base layout (Tailwind config)
-│   ├── login.html         # Login page (Keka dark branding)
+│   ├── login.html         # Login page (dark branding)
 │   └── dashboard.html     # Main SPA - all modules
 └── static/
     └── js/app.js          # Frontend logic, charts, API calls
@@ -190,13 +190,13 @@ All endpoints work in both Mock and Supabase mode via `get_supabase_data()` wrap
 
 ---
 
-## 🎨 UI Details - Keka Exact Clone
+## 🎨 UI Details - Design System
 
 - **Sidebar:** #1e1f2b dark, active state #2f3244, icons with opacity
-- **Primary:** #584ac0 (Keka purple)
+- **Primary:** #584ac0 (brand purple)
 - **Background:** #f6f7fb (light gray)
 - **Cards:** 16px radius, 1px #eef0f6 border, soft shadow
-- **Typography:** Inter + Plus Jakarta Sans (like Keka)
+- **Typography:** Inter + Plus Jakarta Sans
 - **Components:** Pill filters, avatar initials, status dots
 
 ---
@@ -231,4 +231,4 @@ PRs welcome! This is meant as a starter kit for anyone building HRMS in Python.
 
 MIT - Use freely for your company.
 
-Built with ❤️ as Keka clone - Python + Supabase edition.
+Built with ❤️ - Python + Supabase edition.
