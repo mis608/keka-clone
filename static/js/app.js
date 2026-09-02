@@ -10,9 +10,18 @@ let announcementsCache = [];
 let empPage = 1;
 const EMP_PAGE_SIZE = 8;
 
+// ---------- ROLE-BASED ACCESS ----------
+const ADMIN_MODULES = ['employees','orgchart','documents','attendance','leave','timesheet','payroll','expenses','hiring','performance','reports'];
+function isAdmin() { return !!(window.APP_USER && window.APP_USER.role === 'HR Admin'); }
+function applyRoleGating() {
+  if (isAdmin()) return;
+  document.querySelectorAll('.nav-item[data-admin-only]').forEach(n => { n.style.display = 'none'; });
+}
+
 // ---------- INIT ----------
 document.addEventListener('DOMContentLoaded', () => {
   initNavigation();
+  applyRoleGating();
   initClock();
   loadDashboard();
   loadEmployees();
@@ -38,6 +47,10 @@ function initNavigation() {
 }
 
 function switchModule(mod) {
+  if (!isAdmin() && ADMIN_MODULES.includes(mod)) {
+    showToast('[Restricted] This section is only for HR Admins.', 'info');
+    mod = 'home';
+  }
   currentModule = mod;
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   const activeNav = document.querySelector(`.nav-item[data-module="${mod}"]`);
@@ -159,7 +172,7 @@ async function loadOrgChart() {
     };
     const trees = roots.map(r => renderNode(r, 0))
     el.innerHTML = trees.length ? `<ul class="space-y-4">${trees.join('')}</ul>` : '<div class="text-center text-sm text-[#8b8fa3] py-10">No employees to display yet.</div>';
-    if (countEl) countEl.textContent = `${emps.length} employees • ${roots.length} top-level team(s)`;
+    if (countEl) countEl.textContent = `${emps.length} employees â€¢ ${roots.length} top-level team(s)`;
   } catch (err) { console.error('Org chart error', err); el.innerHTML = '<div class="text-center text-sm text-[#ff5a5a] py-10">Failed to load org chart</div>'; }
 }
 window.loadOrgChart = loadOrgChart;
@@ -203,7 +216,7 @@ async function clockAction(action) {
     }
     if (!res.ok) throw new Error(data.error || 'Attendance request failed');
     if (statusEl) {
-      statusEl.innerHTML = `<div class="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div><span class="text-sm">${data.message} • ${data.attendance.clock_in || ''}</span>`;
+      statusEl.innerHTML = `<div class="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div><span class="text-sm">${data.message} â€¢ ${data.attendance.clock_in || ''}</span>`;
     }
     loadAttendance();
     loadDashboard();
@@ -251,25 +264,25 @@ async function loadDashboard() {
         <div class="flex items-center gap-3 p-3 rounded-xl hover:bg-[#f6f7fb] transition cursor-pointer">
           <div class="w-9 h-9 rounded-full bg-[#eef0ff] flex items-center justify-center text-[#584ac0] font-bold text-xs">${(l.employee_name||'U').split(' ').map(w=>w[0]).join('').slice(0,2)}</div>
           <div class="flex-1 min-w-0">
-            <div class="text-[13px] font-medium truncate">${l.employee_name || 'Employee'} • ${l.leave_type || 'Leave'}</div>
-            <div class="text-xs text-[#8b8fa3]">${l.days} day(s) • ${l.start_date}</div>
+            <div class="text-[13px] font-medium truncate">${l.employee_name || 'Employee'} â€¢ ${l.leave_type || 'Leave'}</div>
+            <div class="text-xs text-[#8b8fa3]">${l.days} day(s) â€¢ ${l.start_date}</div>
           </div>
           <div class="flex gap-1">
             <button onclick="handleLeaveAction('${l.id}','Approved')" class="w-7 h-7 rounded-full bg-[#e6f9f0] text-[#00b894] flex items-center justify-center hover:bg-[#00b894] hover:text-white transition"><i class="fas fa-check text-xs"></i></button>
             <button onclick="handleLeaveAction('${l.id}','Rejected')" class="w-7 h-7 rounded-full bg-[#ffecec] text-[#ff5a5a] flex items-center justify-center hover:bg-[#ff5a5a] hover:text-white transition"><i class="fas fa-times text-xs"></i></button>
           </div>
         </div>
-      `).join('') || '<div class="text-sm text-[#8b8fa3] text-center py-4">No pending requests 🎉</div>';
+      `).join('') || '<div class="text-sm text-[#8b8fa3] text-center py-4">No pending requests ðŸŽ‰</div>';
     }
 
     // Inbox
     const inboxEl = document.getElementById('inboxList');
     if (inboxEl) inboxEl.innerHTML = pending.map(l => `
       <div class="p-4 rounded-xl border border-[#eef0f6] flex justify-between items-center">
-        <div class="flex gap-3"><div class="w-10 h-10 rounded-full bg-[#584ac0] text-white flex items-center justify-center font-bold text-sm">${(l.employee_name||'U')[0]}</div><div><div class="font-medium text-sm">${l.employee_name} requested ${l.leave_type}</div><div class="text-xs text-[#8b8fa3]">${l.reason || 'No reason given'} • ${l.start_date} to ${l.end_date}</div></div></div>
+        <div class="flex gap-3"><div class="w-10 h-10 rounded-full bg-[#584ac0] text-white flex items-center justify-center font-bold text-sm">${(l.employee_name||'U')[0]}</div><div><div class="font-medium text-sm">${l.employee_name} requested ${l.leave_type}</div><div class="text-xs text-[#8b8fa3]">${l.reason || 'No reason given'} â€¢ ${l.start_date} to ${l.end_date}</div></div></div>
         <div class="flex gap-2"><button onclick="handleLeaveAction('${l.id}','Approved')" class="px-3 py-1.5 rounded-full bg-[#1e1f2b] text-white text-xs">Approve</button><button onclick="handleLeaveAction('${l.id}','Rejected')" class="px-3 py-1.5 rounded-full border text-xs">Reject</button></div>
       </div>
-    `).join('') || '<div class="text-sm text-[#8b8fa3] text-center py-6">Inbox zero! 🎉 Nothing pending your approval.</div>';
+    `).join('') || '<div class="text-sm text-[#8b8fa3] text-center py-6">Inbox zero! ðŸŽ‰ Nothing pending your approval.</div>';
 
   } catch (e) { console.error('Dashboard load error', e); }
 }
@@ -287,7 +300,7 @@ function avatarBadge(person) {
 function renderTodayWidget(t) {
   if (!t || typeof t !== 'object') return;
   const dateEl = document.getElementById('todayDateLabel');
-  if (dateEl) dateEl.textContent = t.date_label || '—';
+  if (dateEl) dateEl.textContent = t.date_label || 'â€”';
 
   const birthdays = Array.isArray(t.birthdays) ? t.birthdays : [];
   const bBlock = document.getElementById('todayBirthdaysBlock');
@@ -307,7 +320,7 @@ function renderTodayWidget(t) {
   const aList = document.getElementById('todayAnniversariesList');
   if (aBlock) aBlock.style.display = anniversaries.length ? '' : 'none';
   if (aList) aList.innerHTML = anniversaries.map(x => `
-    <div class="flex items-center gap-3">${avatarBadge(x)}<div class="text-[13px]"><span class="font-semibold">${x.name}</span> -  ${Number(x.years) || 0} ${Number(x.years) === 1 ? 'year' : 'years'} at company 🎉</div></div>
+    <div class="flex items-center gap-3">${avatarBadge(x)}<div class="text-[13px]"><span class="font-semibold">${x.name}</span> -  ${Number(x.years) || 0} ${Number(x.years) === 1 ? 'year' : 'years'} at company ðŸŽ‰</div></div>
   `).join('');
 
   const onLeave = Array.isArray(t.on_leave) ? t.on_leave : [];
@@ -315,7 +328,7 @@ function renderTodayWidget(t) {
   const oList = document.getElementById('todayOnLeaveList');
   if (oBlock) oBlock.style.display = onLeave.length ? '' : 'none';
   if (oList) oList.innerHTML = onLeave.map(x => `
-    <div class="flex items-center gap-2">${avatarBadge(x)}<span class="text-[13px]"><span class="font-semibold">${x.name}</span> •  ${x.leave_type || 'On Leave'}</span></div>
+    <div class="flex items-center gap-2">${avatarBadge(x)}<span class="text-[13px]"><span class="font-semibold">${x.name}</span> â€¢  ${x.leave_type || 'On Leave'}</span></div>
   `).join('');
 }
 
@@ -414,7 +427,7 @@ function renderEmployeesTable(employees) {
       <td class="px-6 py-4">
         <div class="flex items-center gap-3">
           <div class="w-9 h-9 rounded-full bg-[#1e1f2b] text-white flex items-center justify-center font-bold text-xs">${emp.avatar || (emp.full_name||'U').split(' ').map(w=>w[0]).join('').slice(0,2)}</div>
-          <div><div class="font-semibold text-[#1e1f2b]">${emp.full_name}</div><div class="text-xs text-[#8b8fa3]">${emp.employee_code} • ${emp.email}</div></div>
+          <div><div class="font-semibold text-[#1e1f2b]">${emp.full_name}</div><div class="text-xs text-[#8b8fa3]">${emp.employee_code} â€¢ ${emp.email}</div></div>
         </div>
       </td>
       <td class="px-4 py-4"><span class="px-2.5 py-1 rounded-full bg-[#f6f7fb] text-xs font-medium">${emp.department || 'Engineering'}</span></td>
@@ -692,12 +705,12 @@ async function loadLeave(filterStatus = 'All') {
         <tr>
           <td class="py-3"><div class="flex items-center gap-2"><div class="w-7 h-7 rounded-full bg-[#1e1f2b] text-white flex items-center justify-center text-[10px] font-bold">${(l.employee_name||'U')[0]}</div><span class="font-medium">${l.employee_name || 'Employee'}</span></div></td>
           <td class="py-3"><span class="px-2 py-1 rounded-full bg-[#f6f7fb] text-xs">${l.leave_type || 'Casual Leave'}</span></td>
-          <td class="py-3 text-xs">${l.start_date} → ${l.end_date}</td>
+          <td class="py-3 text-xs">${l.start_date} â†’ ${l.end_date}</td>
           <td class="py-3 font-semibold">${l.days}d</td>
           <td class="py-3 text-xs text-[#8b8fa3] max-w-[150px] truncate">${l.reason || '-'}</td>
           <td class="py-3"><span class="px-2.5 py-1 rounded-full text-xs font-medium ${l.status==='Approved'?'bg-[#e6f9f0] text-[#00b894]': l.status==='Pending'?'bg-[#fff4e6] text-[#e17055]':'bg-[#ffecec] text-[#ff5a5a]'}">${l.status}</span></td>
           <td class="py-3 text-right">
-            ${l.status==='Pending' ? `<div class="flex gap-1 justify-end"><button onclick="handleLeaveAction('${l.id}','Approved')" class="px-2.5 py-1 rounded-full bg-[#1e1f2b] text-white text-xs">Approve</button><button onclick="handleLeaveAction('${l.id}','Rejected')" class="px-2.5 py-1 rounded-full border text-xs">Reject</button></div>` : '<span class="text-xs text-[#8b8fa3]">—</span>'}
+            ${l.status==='Pending' ? `<div class="flex gap-1 justify-end"><button onclick="handleLeaveAction('${l.id}','Approved')" class="px-2.5 py-1 rounded-full bg-[#1e1f2b] text-white text-xs">Approve</button><button onclick="handleLeaveAction('${l.id}','Rejected')" class="px-2.5 py-1 rounded-full border text-xs">Reject</button></div>` : '<span class="text-xs text-[#8b8fa3]">â€”</span>'}
           </td>
         </tr>
       `).join('') : '<tr><td colspan="7" class="py-10 text-center text-sm text-[#8b8fa3]">No leave requests found for this filter</td></tr>';
@@ -770,9 +783,9 @@ async function loadPayroll() {
       <tr>
         <td class="py-3 font-medium">${p.employee_name || p.employee_id || 'Employee'}</td>
         <td class="py-3">${p.month}/${p.year}</td>
-        <td class="py-3">₹${(p.gross||p.gross_earnings||0).toLocaleString()}</td>
-        <td class="py-3 text-[#e17055]">-₹${(p.deductions||p.total_deductions||0).toLocaleString()}</td>
-        <td class="py-3 font-bold">₹${(p.net||p.net_pay||0).toLocaleString()}</td>
+        <td class="py-3">â‚¹${(p.gross||p.gross_earnings||0).toLocaleString()}</td>
+        <td class="py-3 text-[#e17055]">-â‚¹${(p.deductions||p.total_deductions||0).toLocaleString()}</td>
+        <td class="py-3 font-bold">â‚¹${(p.net||p.net_pay||0).toLocaleString()}</td>
         <td class="py-3"><span class="px-2.5 py-1 rounded-full text-xs ${p.status==='Paid'?'bg-[#e6f9f0] text-[#00b894]':'bg-[#eef0ff] text-[#584ac0]'}">${p.status}</span></td>
         <td class="py-3 text-right"><button onclick="openPayslipModal(${i})" class="px-3 py-1 rounded-full border text-xs hover:bg-[#f6f7fb]">View</button></td>
       </tr>
@@ -792,10 +805,10 @@ function openPayslipModal(index) {
     <div class="grid grid-cols-2 gap-4 text-sm">
       <div><div class="text-xs uppercase tracking-widest text-[#8b8fa3]">Employee</div><div class="font-semibold mt-1">${p.employee_name || p.employee_id || 'Employee'}</div></div>
       <div><div class="text-xs uppercase tracking-widest text-[#8b8fa3]">Period</div><div class="font-semibold mt-1">${monthNames[(p.month||1)-1]} ${p.year}</div></div>
-      <div><div class="text-xs uppercase tracking-widest text-[#8b8fa3]">Gross Earnings</div><div class="font-semibold mt-1">₹${gross.toLocaleString()}</div></div>
-      <div><div class="text-xs uppercase tracking-widest text-[#8b8fa3]">Deductions</div><div class="font-semibold mt-1 text-[#e17055]">-₹${deductions.toLocaleString()}</div></div>
+      <div><div class="text-xs uppercase tracking-widest text-[#8b8fa3]">Gross Earnings</div><div class="font-semibold mt-1">â‚¹${gross.toLocaleString()}</div></div>
+      <div><div class="text-xs uppercase tracking-widest text-[#8b8fa3]">Deductions</div><div class="font-semibold mt-1 text-[#e17055]">-â‚¹${deductions.toLocaleString()}</div></div>
       <div><div class="text-xs uppercase tracking-widest text-[#8b8fa3]">Status</div><div class="font-semibold mt-1">${p.status}</div></div>
-      <div><div class="text-xs uppercase tracking-widest text-[#8b8fa3]">Net Pay</div><div class="font-bold mt-1 text-[#584ac0] text-lg">₹${net.toLocaleString()}</div></div>
+      <div><div class="text-xs uppercase tracking-widest text-[#8b8fa3]">Net Pay</div><div class="font-bold mt-1 text-[#584ac0] text-lg">â‚¹${net.toLocaleString()}</div></div>
     </div>`;
   const modal = document.getElementById('payslipModal');
   if (modal) { modal.classList.remove('hidden'); modal.classList.add('flex'); }
@@ -821,7 +834,7 @@ async function loadHiring() {
       grid.innerHTML = jobs.length ? jobs.map(j => `
         <div onclick="showJobInfo('${(j.title||'').replace(/'/g, "\\'")}', '${j.department || ''}', ${j.applicants || 0}, '${j.status || ''}')" class="keka-card p-5 hover:shadow-lg transition cursor-pointer">
           <div class="flex justify-between items-start"><h4 class="font-semibold">${j.title}</h4><span class="px-2 py-1 rounded-full text-xs ${j.status==='Open'?'bg-[#e6f9f0] text-[#00b894]':'bg-[#fff4e6] text-[#e17055]'}">${j.status}</span></div>
-          <div class="text-xs text-[#8b8fa3] mt-1">${j.department} • ${j.location} • ${j.openings} opening(s)</div>
+          <div class="text-xs text-[#8b8fa3] mt-1">${j.department} â€¢ ${j.location} â€¢ ${j.openings} opening(s)</div>
           <div class="flex items-center gap-2 mt-4"><div class="flex -space-x-1"><div class="w-6 h-6 rounded-full bg-[#eef0ff] border-2 border-white"></div><div class="w-6 h-6 rounded-full bg-[#ffeaa7] border-2 border-white"></div></div><span class="text-xs text-[#8b8fa3]">${j.applicants || 0} applicants</span></div>
         </div>
       `).join('') : '<div class="col-span-3 text-sm text-[#8b8fa3] text-center py-8">No open positions</div>';
@@ -830,8 +843,8 @@ async function loadHiring() {
     if (candEl) {
       candEl.innerHTML = cands.length ? cands.map(c => `
         <div class="flex items-center justify-between p-3 rounded-xl border border-[#eef0f6] hover:bg-[#f9fafe] transition">
-          <div class="flex items-center gap-3"><div class="w-9 h-9 rounded-full bg-[#1e1f2b] text-white flex items-center justify-center font-bold text-xs">${(c.full_name||'U').split(' ').map(w=>w[0]).join('').slice(0,2)}</div><div><div class="font-medium text-sm">${c.full_name}</div><div class="text-xs text-[#8b8fa3]">${c.email} • ${c.experience||c.experience_years||''} exp</div></div></div>
-          <div class="flex items-center gap-3"><span class="px-2.5 py-1 rounded-full bg-[#f6f7fb] text-xs">${c.stage}</span><div class="flex text-amber-400 text-xs">${'★'.repeat(c.rating||0)}${'☆'.repeat(5-(c.rating||0))}</div></div>
+          <div class="flex items-center gap-3"><div class="w-9 h-9 rounded-full bg-[#1e1f2b] text-white flex items-center justify-center font-bold text-xs">${(c.full_name||'U').split(' ').map(w=>w[0]).join('').slice(0,2)}</div><div><div class="font-medium text-sm">${c.full_name}</div><div class="text-xs text-[#8b8fa3]">${c.email} â€¢ ${c.experience||c.experience_years||''} exp</div></div></div>
+          <div class="flex items-center gap-3"><span class="px-2.5 py-1 rounded-full bg-[#f6f7fb] text-xs">${c.stage}</span><div class="flex text-amber-400 text-xs">${'â˜…'.repeat(c.rating||0)}${'â˜†'.repeat(5-(c.rating||0))}</div></div>
         </div>
       `).join('') : '<div class="text-sm text-[#8b8fa3] text-center py-6">No candidates yet</div>';
     }
@@ -839,7 +852,7 @@ async function loadHiring() {
 }
 
 function showJobInfo(title, department, applicants, status) {
-  showToast(`${title} • ${department} • ${applicants} applicants • ${status}`, 'info');
+  showToast(`${title} â€¢ ${department} â€¢ ${applicants} applicants â€¢ ${status}`, 'info');
 }
 window.showJobInfo = showJobInfo;
 
@@ -852,7 +865,7 @@ async function loadAnnouncements() {
     if (!el) return;
     el.innerHTML = announcementsCache.map(a => `
       <div class="p-3 rounded-xl border ${a.is_pinned ? 'bg-[#fffbeb] border-amber-200' : 'bg-[#f9fafe] border-[#eef0f6]'} group">
-        <div class="flex gap-2 items-center"><span class="text-xs px-2 py-0.5 rounded-full ${a.type==='Policy'?'bg-[#eef0ff] text-[#584ac0]': a.type==='Event'?'bg-[#e6f9f0] text-[#00b894]':'bg-white border text-[#8b8fa3]'}">${a.type}</span>${a.is_pinned ? '<span class="text-xs">📌 Pinned</span>' : ''}
+        <div class="flex gap-2 items-center"><span class="text-xs px-2 py-0.5 rounded-full ${a.type==='Policy'?'bg-[#eef0ff] text-[#584ac0]': a.type==='Event'?'bg-[#e6f9f0] text-[#00b894]':'bg-white border text-[#8b8fa3]'}">${a.type}</span>${a.is_pinned ? '<span class="text-xs">ðŸ“Œ Pinned</span>' : ''}
           <span class="ml-auto hidden group-hover:flex gap-1">
             <button onclick="editAnnouncement('${a.id}')" title="Edit" class="w-6 h-6 rounded-full bg-white border border-[#eef0f6] text-[#584ac0] flex items-center justify-center hover:bg-[#eef0ff]"><i class="fas fa-pen text-[10px]"></i></button>
             <button onclick="deleteAnnouncement('${a.id}')" title="Delete" class="w-6 h-6 rounded-full bg-white border border-[#eef0f6] text-[#ff5a5a] flex items-center justify-center hover:bg-[#ffecec]"><i class="fas fa-trash text-[10px]"></i></button>
@@ -871,7 +884,7 @@ function openAnnouncementsModal() {
   if (el) {
     el.innerHTML = announcementsCache.length ? announcementsCache.map(a => `
       <div class="p-4 rounded-xl border ${a.is_pinned ? 'bg-[#fffbeb] border-amber-200' : 'border-[#eef0f6]'}">
-        <div class="flex gap-2 items-center"><span class="text-xs px-2 py-0.5 rounded-full ${a.type==='Policy'?'bg-[#eef0ff] text-[#584ac0]': a.type==='Event'?'bg-[#e6f9f0] text-[#00b894]':'bg-white border text-[#8b8fa3]'}">${a.type}</span>${a.is_pinned ? '<span class="text-xs">📌 Pinned</span>' : ''}
+        <div class="flex gap-2 items-center"><span class="text-xs px-2 py-0.5 rounded-full ${a.type==='Policy'?'bg-[#eef0ff] text-[#584ac0]': a.type==='Event'?'bg-[#e6f9f0] text-[#00b894]':'bg-white border text-[#8b8fa3]'}">${a.type}</span>${a.is_pinned ? '<span class="text-xs">ðŸ“Œ Pinned</span>' : ''}
           <span class="ml-auto flex items-center gap-2">
             <span class="text-[11px] text-[#8b8fa3]">${a.date || ''}</span>
             <button onclick="editAnnouncement('${a.id}')" title="Edit" class="w-6 h-6 rounded-full bg-white border border-[#eef0f6] text-[#584ac0] flex items-center justify-center hover:bg-[#eef0ff]"><i class="fas fa-pen text-[10px]"></i></button>
@@ -907,12 +920,12 @@ function openAnnouncementForm(id = null) {
     form.elements.date.value = a.date || (a.created_at || '').slice(0, 10);
     form.elements.content.value = a.content || '';
     form.elements.is_pinned.checked = !!a.is_pinned;
-    if (heading) heading.textContent = '✏️ Edit Announcement';
+    if (heading) heading.textContent = 'âœï¸ Edit Announcement';
   } else {
     delete form.dataset.editId;
     form.reset();
     form.elements.date.value = new Date().toISOString().slice(0, 10);
-    if (heading) heading.textContent = '📢 New Announcement';
+    if (heading) heading.textContent = 'ðŸ“¢ New Announcement';
   }
   modal.classList.remove('hidden');
   modal.classList.add('flex');
@@ -953,7 +966,7 @@ async function loadGoals() {
         <div class="flex justify-between text-xs mt-2"><span class="text-[#8b8fa3]">Progress</span><span class="font-semibold">${g.progress}%</span></div>
         <div class="text-xs text-[#8b8fa3] mt-2">Due: ${g.due_date}</div>
       </div>
-    `).join('') : '<div class="text-sm text-[#8b8fa3] text-center py-6">No goals yet — create your first one!</div>';
+    `).join('') : '<div class="text-sm text-[#8b8fa3] text-center py-6">No goals yet â€” create your first one!</div>';
   } catch (e) {}
 }
 
@@ -1036,7 +1049,7 @@ async function loadExpenses() {
       <tr class="hover:bg-[#f9fafe] transition">
         <td class="py-3">${x.date || '-'}</td>
         <td class="py-3"><span class="px-2 py-1 rounded-full bg-[#f6f7fb] text-xs">${x.category || '-'}</span></td>
-        <td class="py-3 font-semibold">₹${Number(x.amount || 0).toLocaleString()}</td>
+        <td class="py-3 font-semibold">â‚¹${Number(x.amount || 0).toLocaleString()}</td>
         <td class="py-3"><span class="px-2.5 py-1 rounded-full text-xs font-medium ${x.status==='Approved'?'bg-[#e6f9f0] text-[#00b894]': x.status==='Pending'?'bg-[#fff4e6] text-[#e17055]':'bg-[#ffecec] text-[#ff5a5a]'}">${x.status || 'Pending'}</span></td>
       </tr>
     `).join('') : '<tr><td colspan="4" class="py-10 text-center text-sm text-[#8b8fa3]">No expenses submitted yet</td></tr>';
@@ -1096,7 +1109,7 @@ function handleDocUpload(input) {
   if (grid) {
     const chip = document.createElement('div');
     chip.className = 'border border-[#eef0f6] rounded-xl p-4 flex items-center gap-3';
-    chip.innerHTML = `<i class="fas fa-file-alt text-[#584ac0]"></i><div class="min-w-0"><div class="text-sm font-medium truncate">${file.name}</div><div class="text-xs text-[#8b8fa3]">${(file.size/1024).toFixed(1)} KB • Just now</div></div>`;
+    chip.innerHTML = `<i class="fas fa-file-alt text-[#584ac0]"></i><div class="min-w-0"><div class="text-sm font-medium truncate">${file.name}</div><div class="text-xs text-[#8b8fa3]">${(file.size/1024).toFixed(1)} KB â€¢ Just now</div></div>`;
     grid.prepend(chip);
   }
   showToast(`"${file.name}" uploaded successfully`, 'success');
