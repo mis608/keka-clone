@@ -342,13 +342,82 @@
       </div>
 
       <!-- ================= OTHER MODULES PLACEHOLDER ================= -->
-      <div id="module-me" class="module-section"><div class="keka-card p-12 text-center"><div class="w-20 h-20 rounded-full bg-[#1e1f2b] text-white flex items-center justify-center text-2xl font-bold mx-auto">AU</div><h3 class="font-display font-bold text-xl mt-4">Admin User</h3><p class="text-[#8b8fa3] mt-2">HR Admin • admin@company.com</p><div class="grid grid-cols-3 gap-4 max-w-xl mx-auto mt-8"><div class="bg-[#f6f7fb] rounded-xl p-4"><div class="font-bold text-lg">2.4 yrs</div><div class="text-xs text-[#8b8fa3] uppercase tracking-widest">At Company</div></div><div class="bg-[#f6f7fb] rounded-xl p-4"><div class="font-bold text-lg">12</div><div class="text-xs text-[#8b8fa3] uppercase tracking-widest">Leaves Left</div></div><div class="bg-[#f6f7fb] rounded-xl p-4"><div class="font-bold text-lg">4.6</div><div class="text-xs text-[#8b8fa3] uppercase tracking-widest">Rating</div></div></div></div></div>
-      <div id="module-inbox" class="module-section"><div class="keka-card p-6"><h3 class="font-semibold text-lg mb-4">Inbox (4 pending)</h3><div id="inboxList" class="space-y-3"></div></div></div>
-      <div id="module-orgchart" class="module-section"><div class="keka-card p-12 text-center"><i class="fas fa-sitemap text-4xl text-[#eef0f6] mb-4"></i><h3 class="font-semibold">Org Chart</h3><p class="text-sm text-[#8b8fa3] mt-2">Visual hierarchy of teams - Coming from Supabase org data</p></div></div>
-      <div id="module-documents" class="module-section"><div class="keka-card p-6"><h3 class="font-semibold mb-4">Documents</h3><div class="grid grid-cols-4 gap-4"><div class="border-2 border-dashed border-[#eef0f6] rounded-xl p-8 text-center hover:border-[#584ac0]/30 cursor-pointer transition"><i class="fas fa-cloud-upload-alt text-2xl text-[#8b8fa3] mb-2"></i><div class="text-sm font-medium">Upload Document</div></div></div></div></div>
-      <div id="module-timesheet" class="module-section"><div class="keka-card p-12 text-center"><h3 class="font-semibold">Timesheet Management</h3><p class="text-sm text-[#8b8fa3] mt-2">Log project hours, client billing, and timesheet approvals</p></div></div>
-      <div id="module-expenses" class="module-section space-y-5"><div class="flex justify-between items-center"><h3 class="font-semibold text-lg">Expenses & Reimbursements</h3><button onclick="openExpenseModal()" class="bg-[#584ac0] text-white px-4 py-2 rounded-xl text-sm">+ New Expense</button></div><div class="keka-card p-6"><table class="w-full text-sm"><thead class="text-xs uppercase text-[#8b8fa3] border-b"><tr><th class="text-left py-3">Date</th><th class="text-left py-3">Category</th><th class="text-left py-3">Amount</th><th class="text-left py-3">Status</th></tr></thead><tbody id="expensesTable"></tbody></table></div></div>
-      <div id="module-reports" class="module-section"><div class="keka-card p-12 text-center"><i class="fas fa-chart-bar text-4xl text-[#eef0f6] mb-4"></i><h3 class="font-semibold">Reports & Analytics</h3><p class="text-sm text-[#8b8fa3] mt-2">Custom reports: Headcount, Attrition, Payroll, Attendance - All powered by Supabase views</p></div></div>
+      <div id="module-me" class="module-section space-y-5">
+        <div class="keka-card p-8">
+          <div class="flex flex-col sm:flex-row items-center gap-6">
+            <div id="meAvatar" class="w-20 h-20 rounded-full bg-[#1e1f2b] text-white flex items-center justify-center text-2xl font-bold shrink-0">--</div>
+            <div class="text-center sm:text-left flex-1">
+              <h3 id="meName" class="font-display font-bold text-xl">Loading…</h3>
+              <p id="meMeta" class="text-[#8b8fa3] mt-1 text-sm"></p>
+              <div id="meTags" class="flex flex-wrap gap-2 mt-3 justify-center sm:justify-start"></div>
+            </div>
+          </div>
+          <div id="meStats" class="grid grid-cols-2 md:grid-cols-4 gap-4 mt-8"></div>
+        </div>
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
+          <div class="keka-card p-6"><h4 class="font-semibold mb-4">My Leave Balance</h4><div id="meBalances" class="space-y-3"></div></div>
+          <div class="keka-card p-6"><h4 class="font-semibold mb-4">Upcoming Holidays</h4><div id="meHolidays" class="space-y-2"></div></div>
+        </div>
+      </div>
+      <div id="module-inbox" class="module-section"><div class="keka-card p-6"><h3 class="font-semibold text-lg mb-4">Inbox (<span id="inboxCount">0</span> pending)</h3><div id="inboxList" class="space-y-3"></div></div></div>
+      <div id="module-orgchart" class="module-section">
+        <div class="keka-card p-6">
+          <div class="flex justify-between items-center mb-5">
+            <div><h3 class="font-semibold text-lg">Organization Chart</h3><p class="text-xs text-[#8b8fa3] mt-1">Reporting structure across the company</p></div>
+            <span id="orgCount" class="text-xs px-3 py-1.5 rounded-full bg-[#f6f7fb]"></span>
+          </div>
+          <div id="orgChart" class="overflow-x-auto"></div>
+        </div>
+      </div>
+      <div id="module-documents" class="module-section space-y-5">
+        <div id="docStats" class="grid grid-cols-2 md:grid-cols-4 gap-4"></div>
+        <div class="keka-card p-6">
+          <div class="flex justify-between items-center mb-4">
+            <h3 class="font-semibold">Employee Documents</h3>
+            <div class="flex gap-2">
+              <select id="docFilter" class="px-3 py-2 rounded-xl border border-[#eef0f6] text-sm bg-white">
+                <option>All Status</option><option>Verified</option><option>Pending</option><option>Rejected</option>
+              </select>
+            </div>
+          </div>
+          <table class="w-full text-sm">
+            <thead class="text-xs uppercase text-[#8b8fa3] border-b"><tr>
+              <th class="text-left py-3">Document</th><th class="text-left py-3">Employee</th>
+              <th class="text-left py-3">Type</th><th class="text-left py-3">Uploaded</th><th class="text-left py-3">Status</th>
+            </tr></thead>
+            <tbody id="documentsTable"></tbody>
+          </table>
+        </div>
+      </div>
+      <div id="module-timesheet" class="module-section space-y-5">
+        <div class="keka-card p-6">
+          <div class="flex flex-wrap justify-between items-center gap-3 mb-5">
+            <div><h3 class="font-semibold text-lg">This Week</h3><p id="tsRange" class="text-xs text-[#8b8fa3] mt-1"></p></div>
+            <div class="text-right"><div id="tsTotal" class="font-display font-bold text-2xl">0h</div><div class="text-xs text-[#8b8fa3]">of <span id="tsExpected">40</span>h expected</div></div>
+          </div>
+          <div class="w-full bg-[#f6f7fb] h-2 rounded-full mb-6"><div id="tsBar" class="bg-[#584ac0] h-2 rounded-full transition-all" style="width:0%"></div></div>
+          <div id="timesheetGrid" class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3"></div>
+        </div>
+      </div>
+      <div id="module-expenses" class="module-section space-y-5"><div class="flex justify-between items-center"><h3 class="font-semibold text-lg">Expenses & Reimbursements</h3><button onclick="openExpenseModal()" class="bg-[#584ac0] text-white px-4 py-2 rounded-xl text-sm">+ New Expense</button></div><div class="keka-card p-6"><table class="w-full text-sm"><thead class="text-xs uppercase text-[#8b8fa3] border-b"><tr><th class="text-left py-3">Date</th><th class="text-left py-3">Employee</th><th class="text-left py-3">Category</th><th class="text-left py-3">Description</th><th class="text-left py-3">Amount</th><th class="text-left py-3">Status</th></tr></thead><tbody id="expensesTable"></tbody></table></div></div>
+      <div id="module-reports" class="module-section space-y-5">
+        <div id="reportKpis" class="grid grid-cols-2 lg:grid-cols-4 gap-4"></div>
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
+          <div class="keka-card p-6"><h4 class="font-semibold mb-4">Headcount by Department</h4><div id="reportDept" class="space-y-3"></div></div>
+          <div class="keka-card p-6"><h4 class="font-semibold mb-4">Headcount by Location</h4><div id="reportLocation" class="space-y-3"></div></div>
+          <div class="keka-card p-6"><h4 class="font-semibold mb-4">Leave Days by Type</h4><div id="reportLeave" class="space-y-3"></div></div>
+          <div class="keka-card p-6"><h4 class="font-semibold mb-4">Employment Status Mix</h4><div id="reportStatus" class="space-y-3"></div></div>
+        </div>
+        <div class="keka-card p-6 flex flex-wrap gap-3 items-center justify-between">
+          <div><h4 class="font-semibold">Export</h4><p class="text-xs text-[#8b8fa3] mt-1">Download the current data as CSV</p></div>
+          <div class="flex flex-wrap gap-2">
+            <button onclick="exportCsv('employees')" class="px-4 py-2 rounded-xl border text-sm hover:bg-[#f6f7fb]">Employees</button>
+            <button onclick="exportCsv('leave')" class="px-4 py-2 rounded-xl border text-sm hover:bg-[#f6f7fb]">Leave requests</button>
+            <button onclick="exportCsv('attendance')" class="px-4 py-2 rounded-xl border text-sm hover:bg-[#f6f7fb]">Attendance</button>
+            <button onclick="exportCsv('expenses')" class="px-4 py-2 rounded-xl border text-sm hover:bg-[#f6f7fb]">Expenses</button>
+          </div>
+        </div>
+      </div>
 
     </main>
   </div>
