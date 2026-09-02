@@ -192,6 +192,26 @@ def first_supabase_employee_id(employee_id=None):
             return match[0]["id"]
     return employees[0]["id"]
 
+def resolve_leave_type_id(leave_type_value):
+    """Map a leave-type display value (e.g. 'Casual Leave (CL)') to the real leave_types UUID
+    when Supabase is active, so the insert into the uuid FK column succeeds.
+ Falls back to
+    the cleaned name for mock mode."""
+    cleaned = (leave_type_value or 'Casual Leave' ).split(' (')[0].strip()
+    cleaned = cleaned or 'Casual Leave'
+    if not supabase:
+        return cleaned
+    try:
+        needle = cleaned.lower()
+        for lt in get_supabase_data('leave_types'):
+            lt_name = (lt.get('name') or '' ).strip().lower()
+            lt_code = (lt.get('code') or '' ).strip().lower()
+            if lt_name == needle or lt_code == needle:
+                return lt.get('id')
+    except Exception as e:
+        print(f"Leave type resolve error: {e}")
+    return cleaned
+
 def resolve_department_id(department_id):
     if not supabase or not department_id or len(str(department_id)) > 10:
         return department_id
@@ -502,6 +522,10 @@ def api_leave_requests():
         employee_id = data.get('employee_id') or 'e1'
         employees = get_supabase_data('employees')
         employee = next((e for e in employees if e.get('id') == employee_id), None)
+        if employee is None and supabase and employees:
+            # Mock-style id (e.g. 'e1') won't exist on Supabase; use a real employee UUID instead
+            employee = employees[0]
+            employee_id = employee.get('id')
         employee_name = (data.get('employee_name') or (employee.get('full_name') if employee else 'Current User')).strip() or 'Current User'
 
         leave_type_value = (data.get('leave_type') or 'Casual Leave').strip()
@@ -509,7 +533,7 @@ def api_leave_requests():
 
         payload = {
             "employee_id": employee_id,
-            "leave_type_id": data.get('leave_type_id') or leave_type_name,
+            "leave_type_id": resolve_leave_type_id(data.get('leave_type_id') or leave_type_name),
             "start_date": start_date,
             "end_date": end_date,
             "days": days,
@@ -528,6 +552,13 @@ def api_leave_requests():
 
     status_filter = request.args.get('status')
     data = get_supabase_data("leave_requests")
+    if supabase:
+        # Enrich raw rows with display names (column has UUIDs; UI expects friendly names)
+        emp_map = {e.get('id'): e.get('full_name') for e in get_supabase_data('employees')}
+        lt_map = {lt.get('id'): lt.get('name') for lt in get_supabase_data('leave_types')}
+        for row in data:
+            row.setdefault('employee_name', emp_map.get(row.get('employee_id'), 'Employee'))
+            row.setdefault('leave_type', lt_map.get(row.get('leave_type_id'), 'Casual Leave'))
     if status_filter and status_filter != 'All':
         data = [d for d in data if d.get('status') == status_filter]
     return jsonify(data)
@@ -717,6 +748,10 @@ def api_reimbursements():
         employee_id = data.get('employee_id') or 'e1'
         employees = get_supabase_data('employees')
         employee = next((e for e in employees if e.get('id') == employee_id), None)
+        if employee is None and supabase and employees:
+            # Mock-style id (e.g. 'e1') won't exist on Supabase; use a real employee UUID instead
+            employee = employees[0]
+            employee_id = employee.get('id')
         employee_name = (data.get('employee_name') or (employee.get('full_name') if employee else 'Current User')).strip() or 'Current User'
 
         payload = {
@@ -732,6 +767,10 @@ def api_reimbursements():
         return jsonify(result or payload)
 
     data = get_supabase_data("reimbursements")
+    if supabase:
+        emp_map = {e.get('id'): e.get('full_name') for e in get_supabase_data('employees')}
+        for row in data:
+            row.setdefault('employee_name', emp_map.get(row.get('employee_id'), 'Employee'))
     return jsonify(data if isinstance(data, list) else [])
 
 # Health check
