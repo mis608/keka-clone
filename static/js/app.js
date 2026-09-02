@@ -173,6 +173,7 @@ async function loadDashboard() {
     document.getElementById('statOnLeave').textContent = statsRes.on_leave ?? 0;
     document.getElementById('statOpenJobs').textContent = statsRes.open_positions ?? 0;
     document.getElementById('statAttendanceRate').textContent = (statsRes.attendance_rate ?? 0) + '%';
+    renderTodayWidget(statsRes.today);
 
     // Charts
     renderAttendanceChart();
@@ -210,6 +211,51 @@ async function loadDashboard() {
     `).join('') || '<div class="text-sm text-[#8b8fa3] text-center py-6">Inbox zero! 🎉 Nothing pending your approval.</div>';
 
   } catch (e) { console.error('Dashboard load error', e); }
+}
+
+function personInitials(name) {
+  const n = (name || '?' ).trim().split(/\s+/).map(w => w[0] || '' ).join('').slice(0, 2);
+  return n.toUpperCase() || '?';
+}
+
+function avatarBadge(person) {
+  const s = (person.avatar || '' ).trim();
+  return `<div class="w-10 h-10 shrink-0 rounded-xl bg-[#eef0ff] text-[#584ac0] flex items-center justify-center font-bold text-xs border-2 border-white">${s ? s.slice(0, 2).toUpperCase() : personInitials(person.name)}</div>`;
+}
+
+function renderTodayWidget(t) {
+  if (!t || typeof t !== 'object') return;
+  const dateEl = document.getElementById('todayDateLabel');
+  if (dateEl) dateEl.textContent = t.date_label || '—';
+
+  const birthdays = Array.isArray(t.birthdays) ? t.birthdays : [];
+  const bBlock = document.getElementById('todayBirthdaysBlock');
+  const bList = document.getElementById('todayBirthdaysList');
+  if (bBlock) bBlock.style.display = birthdays.length ? '' : 'none';
+  if (bList && birthdays.length) {
+    const shown = birthdays.slice(0, 2);
+    const extra = birthdays.length - shown.length;
+    bList.innerHTML = `
+      <div class="flex -space-x-2">${shown.map(avatarBadge).join('')}${extra > 0 ? `<div class="w-8 h-8 rounded-full bg-[#81ecec] border-2 border-white flex items-center justify-center text-xs font-bold">+${extra}</div>` : ''}</div>
+      <div class="text-[13px]"><span class="font-semibold">${shown.map(x => x.name).join(', ')}</span> ${birthdays.length === 1 ? 'has' : 'have'} birthdays today</div>
+    `;
+  }
+
+  const anniversaries = Array.isArray(t.anniversaries) ? t.anniversaries : [];
+  const aBlock = document.getElementById('todayAnniversariesBlock');
+  const aList = document.getElementById('todayAnniversariesList');
+  if (aBlock) aBlock.style.display = anniversaries.length ? '' : 'none';
+  if (aList) aList.innerHTML = anniversaries.map(x => `
+    <div class="flex items-center gap-3">${avatarBadge(x)}<div class="text-[13px]"><span class="font-semibold">${x.name}</span> -  ${Number(x.years) || 0} ${Number(x.years) === 1 ? 'year' : 'years'} at company 🎉</div></div>
+  `).join('');
+
+  const onLeave = Array.isArray(t.on_leave) ? t.on_leave : [];
+  const oBlock = document.getElementById('todayOnLeaveBlock');
+  const oList = document.getElementById('todayOnLeaveList');
+  if (oBlock) oBlock.style.display = onLeave.length ? '' : 'none';
+  if (oList) oList.innerHTML = onLeave.map(x => `
+    <div class="flex items-center gap-2">${avatarBadge(x)}<span class="text-[13px]"><span class="font-semibold">${x.name}</span> •  ${x.leave_type || 'On Leave'}</span></div>
+  `).join('');
 }
 
 function updateInboxBadge(count) {
