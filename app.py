@@ -64,14 +64,14 @@ mock_db = {
         {"id": "d6", "name": "Design", "description": "Product Design", "employee_count": 9},
     ],
     "employees": [
-        {"id": "e1", "employee_code": "KEKA001", "full_name": "Aarav Sharma", "email": "aarav.sharma@company.com", "phone": "+91 98765 43210", "department_id": "d1", "department": "Engineering", "designation": "Senior Software Engineer", "manager": "Priya Nair", "date_of_joining": "2022-03-15", "status": "Active", "employment_type": "Full-time", "work_location": "Bangalore", "avatar": "AS", "salary_ctc": 1800000},
-        {"id": "e2", "employee_code": "KEKA002", "full_name": "Priya Nair", "email": "priya.nair@company.com", "phone": "+91 98765 43211", "department_id": "d1", "department": "Engineering", "designation": "Engineering Manager", "manager": "Vikram Singh", "date_of_joining": "2020-01-10", "status": "Active", "employment_type": "Full-time", "work_location": "Bangalore", "avatar": "PN", "salary_ctc": 3200000},
-        {"id": "e3", "employee_code": "KEKA003", "full_name": "Rohan Mehta", "email": "rohan.mehta@company.com", "phone": "+91 98765 43212", "department_id": "d3", "department": "Sales", "designation": "Sales Executive", "manager": "Ananya Gupta", "date_of_joining": "2023-06-01", "status": "Active", "employment_type": "Full-time", "work_location": "Mumbai", "avatar": "RM", "salary_ctc": 1200000},
-        {"id": "e4", "employee_code": "KEKA004", "full_name": "Ananya Gupta", "email": "ananya.gupta@company.com", "phone": "+91 98765 43213", "department_id": "d2", "department": "Human Resources", "designation": "HR Business Partner", "manager": "Vikram Singh", "date_of_joining": "2021-08-20", "status": "Active", "employment_type": "Full-time", "work_location": "Bangalore", "avatar": "AG", "salary_ctc": 1500000},
-        {"id": "e5", "employee_code": "KEKA005", "full_name": "Vikram Singh", "email": "vikram.singh@company.com", "phone": "+91 98765 43214", "department_id": "d1", "department": "Engineering", "designation": "CTO", "manager": "-", "date_of_joining": "2019-05-01", "status": "Active", "employment_type": "Full-time", "work_location": "Bangalore", "avatar": "VS", "salary_ctc": 5000000},
-        {"id": "e6", "employee_code": "KEKA006", "full_name": "Sneha Reddy", "email": "sneha.reddy@company.com", "phone": "+91 98765 43215", "department_id": "d6", "department": "Design", "designation": "Product Designer", "manager": "Priya Nair", "date_of_joining": "2022-11-12", "status": "On Leave", "employment_type": "Full-time", "work_location": "Hyderabad", "avatar": "SR", "salary_ctc": 1400000},
-        {"id": "e7", "employee_code": "KEKA007", "full_name": "Kabir Khan", "email": "kabir.khan@company.com", "phone": "+91 98765 43216", "department_id": "d1", "department": "Engineering", "designation": "DevOps Engineer", "manager": "Priya Nair", "date_of_joining": "2023-02-18", "status": "Active", "employment_type": "Full-time", "work_location": "Remote", "avatar": "KK", "salary_ctc": 1600000},
-        {"id": "e8", "employee_code": "KEKA008", "full_name": "Ishita Patel", "email": "ishita.patel@company.com", "phone": "+91 98765 43217", "department_id": "d4", "department": "Marketing", "designation": "Content Strategist", "manager": "Ananya Gupta", "date_of_joining": "2023-09-05", "status": "Probation", "employment_type": "Full-time", "work_location": "Bangalore", "avatar": "IP", "salary_ctc": 900000},
+        {"id": "e1", "employee_code": "KEKA001", "full_name": "Aarav Sharma", "email": "aarav.sharma@company.com", "phone": "+91 98765 43210", "department_id": "d1", "department": "Engineering", "designation": "Senior Software Engineer", "manager": "Priya Nair", "date_of_joining": "2022-03-15", "status": "Active", "employment_type": "Full-time", "work_location": "Bangalore", "avatar": "AS", "salary_ctc": 1800000, "date_of_birth": "1997-09-02"},
+        {"id": "e2", "employee_code": "KEKA002", "full_name": "Priya Nair", "email": "priya.nair@company.com", "phone": "+91 98765 43211", "department_id": "d1", "department": "Engineering", "designation": "Engineering Manager", "manager": "Vikram Singh", "date_of_joining": "2020-01-10", "status": "Active", "employment_type": "Full-time", "work_location": "Bangalore", "avatar": "PN", "salary_ctc": 3200000, "date_of_birth": "1994-09-02"},
+        {"id": "e3", "employee_code": "KEKA003", "full_name": "Rohan Mehta", "email": "rohan.mehta@company.com", "phone": "+91 98765 43212", "department_id": "d3", "department": "Sales", "designation": "Sales Executive", "manager": "Ananya Gupta", "date_of_joining": "2023-06-01", "status": "Active", "employment_type": "Full-time", "work_location": "Mumbai", "avatar": "RM", "salary_ctc": 1200000, "date_of_birth": "1996-03-15"},
+        {"id": "e4", "employee_code": "KEKA004", "full_name": "Ananya Gupta", "email": "ananya.gupta@company.com", "phone": "+91 98765 43213", "department_id": "d2", "department": "Human Resources", "designation": "HR Business Partner", "manager": "Vikram Singh", "date_of_joining": "2021-08-20", "status": "Active", "employment_type": "Full-time", "work_location": "Bangalore", "avatar": "AG", "salary_ctc": 1500000, "date_of_birth": "1998-11-20"},
+        {"id": "e5", "employee_code": "KEKA005", "full_name": "Vikram Singh", "email": "vikram.singh@company.com", "phone": "+91 98765 43214", "department_id": "d1", "department": "Engineering", "designation": "CTO", "manager": "-", "date_of_joining": "2019-09-02", "status": "Active", "employment_type": "Full-time", "work_location": "Bangalore", "avatar": "VS", "salary_ctc": 5000000, "date_of_birth": "1991-05-01"},
+        {"id": "e6", "employee_code": "KEKA006", "full_name": "Sneha Reddy", "email": "sneha.reddy@company.com", "phone": "+91 98765 43215", "department_id": "d6", "department": "Design", "designation": "Product Designer", "manager": "Priya Nair", "date_of_joining": "2022-11-12", "status": "On Leave", "employment_type": "Full-time", "work_location": "Hyderabad", "avatar": "SR", "salary_ctc": 1400000, "date_of_birth": "1997-07-22"},
+        {"id": "e7", "employee_code": "KEKA007", "full_name": "Kabir Khan", "email": "kabir.khan@company.com", "phone": "+91 98765 43216", "department_id": "d1", "department": "Engineering", "designation": "DevOps Engineer", "manager": "Priya Nair", "date_of_joining": "2023-02-18", "status": "Active", "employment_type": "Full-time", "work_location": "Remote", "avatar": "KK", "salary_ctc": 1600000, "date_of_birth": "1993-12-10"},
+        {"id": "e8", "employee_code": "KEKA008", "full_name": "Ishita Patel", "email": "ishita.patel@company.com", "phone": "+91 98765 43217", "department_id": "d4", "department": "Marketing", "designation": "Content Strategist", "manager": "Ananya Gupta", "date_of_joining": "2023-09-05", "status": "Probation", "employment_type": "Full-time", "work_location": "Bangalore", "avatar": "IP", "salary_ctc": 900000, "date_of_birth": "2000-04-18"},
     ],
     "attendance": [
         {"id": "a1", "employee_id": "e1", "date": str(date.today()), "clock_in": "09:32 AM", "clock_out": "06:45 PM", "work_hours": 8.2, "status": "Present"},
@@ -264,6 +264,49 @@ def api_stats():
     pending_leaves = len([l for l in leaves if l.get('status') == 'Pending'])
     open_jobs = len([j for j in jobs if j.get('status') == 'Open'])
     
+    # "Today" widget data - birthdays, work anniversaries, who's on leave (computed for current date)
+    today = date.today()
+
+    def _avatar(e):
+        av = (e.get('avatar') or '' ).strip()
+        if av:
+            return av[:2].upper()
+        parts = (e.get('full_name') or '' ).strip().split()
+        return ''.join(w[0] for w in parts[:2]).upper() if parts else '?'
+
+    birthday_people, anniversary_people = [], []
+    for e in employees:
+        dob = e.get('date_of_birth')
+        if dob:
+            try:
+                dob_d = date.fromisoformat(str(dob)[:10])
+            except ValueError:
+                dob_d = None
+            if dob_d and (dob_d.month, dob_d.day) == (today.month, today.day):
+                birthday_people.append({'name': e.get('full_name'), 'avatar': _avatar(e), 'employee_id': e.get('id')})
+        doj = e.get('date_of_joining')
+        if doj:
+            try:
+                doj_d = date.fromisoformat(str(doj)[:10])
+            except ValueError:
+                doj_d = None
+            if doj_d and (doj_d.month, doj_d.day) == (today.month, today.day):
+                anniversary_people.append({'name': e.get('full_name'), 'years': today.year - doj_d.year, 'avatar': _avatar(e), 'employee_id': e.get('id')})
+
+    approved_leaves = {}
+    for l in leaves:
+        if l.get('status') == 'Approved' and l.get('employee_id')and l.get('leave_type'):
+            approved_leaves.setdefault(l['employee_id'], l['leave_type'])
+    on_leave_today = []
+    for e in employees:
+        if (e.get('status') or '' ).lower() == 'on leave':
+            on_leave_today.append({
+                'name': e.get('full_name'),
+                'leave_type': approved_leaves.get(e.get('id')) or 'On Leave',
+                'avatar': _avatar(e),
+                'employee_id': e.get('id')
+            })
+
     # Department distribution
     dept_count = {}
     for e in employees:
@@ -281,7 +324,13 @@ def api_stats():
         "pending_leaves": pending_leaves,
         "open_positions": open_jobs,
         "attendance_rate": round((present_today / total_emp * 100) if total_emp else 0, 1),
-        "department_distribution": dept_count
+        "department_distribution": dept_count,
+        "today": {
+            "date_label": today.strftime("%d %b"),
+            "birthdays": birthday_people,
+            "anniversaries": anniversary_people,
+            "on_leave": on_leave_today
+        }
     })
 
 @app.route('/api/employees', methods=['GET', 'POST'])
