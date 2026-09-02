@@ -65,35 +65,35 @@
       <div>
         <div class="text-[11px] font-semibold tracking-widest text-white/30 uppercase px-3 mb-2">Organization</div>
         <div class="space-y-1">
-          <a data-module="employees" class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13.5px] font-medium text-white/70 hover:bg-white/[0.06] hover:text-white transition cursor-pointer"><i class="fas fa-users w-5 text-white/40"></i> Employees</a>
-          <a data-module="orgchart" class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13.5px] font-medium text-white/70 hover:bg-white/[0.06] hover:text-white transition cursor-pointer"><i class="fas fa-sitemap w-5 text-white/40"></i> Org Chart</a>
-          <a data-module="documents" class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13.5px] font-medium text-white/70 hover:bg-white/[0.06] hover:text-white transition cursor-pointer"><i class="far fa-folder w-5 text-white/40"></i> Documents</a>
+          <a data-module="employees" data-admin-only class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13.5px] font-medium text-white/70 hover:bg-white/[0.06] hover:text-white transition cursor-pointer"><i class="fas fa-users w-5 text-white/40"></i> Employees</a>
+          <a data-module="orgchart" data-admin-only class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13.5px] font-medium text-white/70 hover:bg-white/[0.06] hover:text-white transition cursor-pointer"><i class="fas fa-sitemap w-5 text-white/40"></i> Org Chart</a>
+          <a data-module="documents" data-admin-only class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13.5px] font-medium text-white/70 hover:bg-white/[0.06] hover:text-white transition cursor-pointer"><i class="far fa-folder w-5 text-white/40"></i> Documents</a>
         </div>
       </div>
 
       <div>
         <div class="text-[11px] font-semibold tracking-widest text-white/30 uppercase px-3 mb-2">Time & Attendance</div>
         <div class="space-y-1">
-          <a data-module="attendance" class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13.5px] font-medium text-white/70 hover:bg-white/[0.06] hover:text-white transition cursor-pointer"><i class="far fa-clock w-5 text-white/40"></i> Attendance</a>
-          <a data-module="leave" class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13.5px] font-medium text-white/70 hover:bg-white/[0.06] hover:text-white transition cursor-pointer"><i class="far fa-calendar-check w-5 text-white/40"></i> Leave</a>
-          <a data-module="timesheet" class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13.5px] font-medium text-white/70 hover:bg-white/[0.06] hover:text-white transition cursor-pointer"><i class="fas fa-stopwatch w-5 text-white/40"></i> Timesheet</a>
+          <a data-module="attendance" data-admin-only class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13.5px] font-medium text-white/70 hover:bg-white/[0.06] hover:text-white transition cursor-pointer"><i class="far fa-clock w-5 text-white/40"></i> Attendance</a>
+          <a data-module="leave" data-admin-only class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13.5px] font-medium text-white/70 hover:bg-white/[0.06] hover:text-white transition cursor-pointer"><i class="far fa-calendar-check w-5 text-white/40"></i> Leave</a>
+          <a data-module="timesheet" data-admin-only class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13.5px] font-medium text-white/70 hover:bg-white/[0.06] hover:text-white transition cursor-pointer"><i class="fas fa-stopwatch w-5 text-white/40"></i> Timesheet</a>
         </div>
       </div>
 
       <div>
         <div class="text-[11px] font-semibold tracking-widest text-white/30 uppercase px-3 mb-2">Payroll & Finance</div>
         <div class="space-y-1">
-          <a data-module="payroll" class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13.5px] font-medium text-white/70 hover:bg-white/[0.06] hover:text-white transition cursor-pointer"><i class="fas fa-wallet w-5 text-white/40"></i> Payroll</a>
-          <a data-module="expenses" class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13.5px] font-medium text-white/70 hover:bg-white/[0.06] hover:text-white transition cursor-pointer"><i class="fas fa-receipt w-5 text-white/40"></i> Expenses</a>
+          <a data-module="payroll" data-admin-only class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13.5px] font-medium text-white/70 hover:bg-white/[0.06] hover:text-white transition cursor-pointer"><i class="fas fa-wallet w-5 text-white/40"></i> Payroll</a>
+          <a data-module="expenses" data-admin-only class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13.5px] font-medium text-white/70 hover:bg-white/[0.06] hover:text-white transition cursor-pointer"><i class="fas fa-receipt w-5 text-white/40"></i> Expenses</a>
         </div>
       </div>
 
       <div>
         <div class="text-[11px] font-semibold tracking-widest text-white/30 uppercase px-3 mb-2">Talent</div>
         <div class="space-y-1">
-          <a data-module="hiring" class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13.5px] font-medium text-white/70 hover:bg-white/[0.06] hover:text-white transition cursor-pointer"><i class="fas fa-briefcase w-5 text-white/40"></i> Hiring</a>
-          <a data-module="performance" class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13.5px] font-medium text-white/70 hover:bg-white/[0.06] hover:text-white transition cursor-pointer"><i class="fas fa-bullseye w-5 text-white/40"></i> Performance</a>
-          <a data-module="reports" class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13.5px] font-medium text-white/70 hover:bg-white/[0.06] hover:text-white transition cursor-pointer"><i class="fas fa-chart-bar w-5 text-white/40"></i> Reports</a>
+          <a data-module="hiring" data-admin-only class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13.5px] font-medium text-white/70 hover:bg-white/[0.06] hover:text-white transition cursor-pointer"><i class="fas fa-briefcase w-5 text-white/40"></i> Hiring</a>
+          <a data-module="performance" data-admin-only class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13.5px] font-medium text-white/70 hover:bg-white/[0.06] hover:text-white transition cursor-pointer"><i class="fas fa-bullseye w-5 text-white/40"></i> Performance</a>
+          <a data-module="reports" data-admin-only class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13.5px] font-medium text-white/70 hover:bg-white/[0.06] hover:text-white transition cursor-pointer"><i class="fas fa-chart-bar w-5 text-white/40"></i> Reports</a>
         </div>
       </div>
     </nav>
@@ -501,5 +501,6 @@
   </div>
 </div>
 
+<script>window.APP_USER = {{ user|tojson }};</script>
 <script src="/static/js/app.js"></script>
 {% endblock %}
