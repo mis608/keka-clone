@@ -409,13 +409,17 @@ def api_employees():
     dept_filter = request.args.get('department')
     status_filter = request.args.get('status')
     
-    employees_all = get_supabase_data("employees")
+    employees = get_supabase_data("employees")
     dept_map, desig_map, emp_map = {}, {}, {}
     if supabase:
         dept_map = {d.get('id'): d.get('name') for d in get_supabase_data('departments')}
         desig_map = {d.get('id'): d.get('title') for d in get_supabase_data('designations')}
-        emp_map = {e.get('id'): e.get('full_name') for e in employees_all}
-    employees = employees_all
+        emp_map = {e.get('id'): e.get('full_name') for e in employees}
+        for e in employees:
+            e['department'] = e.get('department') or dept_map.get(e.get('department_id')) or ''
+            e['designation'] = e.get('designation') or desig_map.get(e.get('designation_id')) or ''
+            if e.get('manager_id'):
+                e['manager'] = emp_map.get(e.get('manager_id')) or ''
     if search:
         employees = [e for e in employees if search in e.get('full_name','').lower() or search in e.get('email','').lower() or search in e.get('employee_code','').lower()]
     if dept_filter and dept_filter != 'All':
@@ -423,13 +427,6 @@ def api_employees():
     if status_filter and status_filter != 'All':
         employees = [e for e in employees if e.get('status') == status_filter]
     
-    if supabase:
-        # Enrich display fields so UI gets friendly names (org chart + employees table)
-        for e in employees:
-            e['department'] = e.get('department') or dept_map.get(e.get('department_id')) or ''
-            e['designation'] = e.get('designation') or desig_map.get(e.get('designation_id')) or ''
-            if e.get('manager_id'):
-                e['manager'] = emp_map.get(e.get('manager_id')) or ''
     return jsonify(employees)
 
 @app.route('/api/employees/<emp_id>', methods=['GET', 'PUT', 'DELETE'])
