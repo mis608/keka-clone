@@ -66,13 +66,14 @@
                 <div>
                     <div class="flex justify-between items-center mb-2">
                         <label class="text-sm font-medium text-[#1e1f2b]">Password</label>
-                        <a href="#" class="text-sm text-[#584ac0] font-medium hover:underline">Forgot?</a>
+                        <span class="text-xs text-[#8b8fa3] pt-0.5">Forgotten? HR can issue a one-time password</span>
                     </div>
                     <div class="relative">
                         <span class="absolute left-4 top-1/2 -translate-y-1/2 text-[#8b8fa3]"><i class="fas fa-lock"></i></span>
-                        <input type="password" name="password" required class="w-full pl-11 pr-4 py-3.5 rounded-xl border border-gray-200 focus:border-[#584ac0] focus:ring-4 focus:ring-[#584ac0]/10 outline-none transition text-[14px]" placeholder="••••••••">
+                        <input id="loginPassword" type="password" name="password" required class="w-full pl-11 pr-11 py-3.5 rounded-xl border border-gray-200 focus:border-[#584ac0] focus:ring-4 focus:ring-[#584ac0]/10 outline-none transition text-[14px]" placeholder="••••••••">
+                        <button type="button" id="togglePw" aria-label="Show password" class="absolute right-3 top-1/2 -translate-y-1/2 w-7 h-7 rounded-lg text-[#8b8fa3] hover:bg-[#f6f7fb] transition"><i class="far fa-eye"></i></button>
                     </div>
-                    <p class="text-xs text-[#8b8fa3] mt-2">🔒 Access restricted — only authorized admin emails can sign in.</p>
+                    <p class="text-xs text-[#8b8fa3] mt-2">Everyone signs in with their work email. HR Admins get the full console; the rest of the team gets their own attendance, leave, payslips, claims, documents and goals.</p>
                 </div>
 
                 <div id="loginError" class="hidden mb-4 p-3 rounded-xl bg-[#ffecec] border border-[#ffd6d6] text-[#e17055] text-sm"></div>
@@ -97,6 +98,12 @@
                     <div>
                         <div class="text-sm font-semibold text-[#1e1f2b]">Quick Demo Access</div>
                         <div class="text-xs text-[#8b8fa3] mt-1 leading-relaxed">No Supabase? App runs in <span class="font-semibold text-[#584ac0]">Mock Mode</span> with sample data. Add your Supabase keys in .env to connect real database.</div>
+                        {% if mock_mode %}<div class="flex flex-wrap items-center gap-1.5 mt-2 text-xs">
+                        <button type="button" id="fillAdmin" class="font-medium text-[#584ac0] hover:underline">Fill the HR Admin email</button>
+                        <span class="text-[#c3c6d4]">·</span>
+                        <button type="button" id="fillEmployee" class="font-medium text-[#584ac0] hover:underline">Fill an employee email</button>
+                        <span class="text-[#8b8fa3]">(demo data only)</span>
+                    </div>{% endif %}
                     </div>
                 </div>
             </div>
@@ -126,7 +133,7 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
         if (data?.success) window.location.href = data.redirect || '/dashboard';
         else {
           const errEl = document.getElementById('loginError');
-          if (errEl) { errEl.textContent = data?.error || 'Access denied — only authorized admins can sign in.'; errEl.classList.remove('hidden'); }
+          if (errEl) { errEl.textContent = data?.error || 'Could not sign you in. Check the email and password and try again.'; errEl.classList.remove('hidden'); }
         }
     } catch(err) {
         // Fallback - form POST
@@ -135,6 +142,29 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
         btn.innerHTML = original;
         btn.disabled = false;
     }
+});
+document.getElementById('togglePw')?.addEventListener('click', () => {
+    const inp = document.getElementById('loginPassword');
+    const ic = document.querySelector('#togglePw i');
+    const show = inp.type === 'password';
+    inp.type = show ? 'text' : 'password';
+    if (ic) ic.className = show ? 'far fa-eye-slash' : 'far fa-eye';
+    inp.focus();
+});
+// quick-fill only writes the email: passwords are never rendered into the page
+document.getElementById('fillAdmin')?.addEventListener('click', () => {
+    document.querySelector('input[name=email]').value = 'admin@company.com';
+    document.querySelector('input[name=password]').focus();
+});
+document.getElementById('fillEmployee')?.addEventListener('click', async () => {
+    try {
+        const res = await fetch('/api/login-hint');
+        const d = await res.json();
+        if (d.email) {
+            document.querySelector('input[name=email]').value = d.email;
+            document.querySelector('input[name=password]').focus();
+        }
+    } catch (e) { /* demo hint is optional */ }
 });
 </script>
 {% endblock %}
