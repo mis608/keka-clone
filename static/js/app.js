@@ -13,6 +13,14 @@ function esc(v) {
   return String(v).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 function isAdmin() { return APP.user.role === 'HR Admin'; }
+/* The server hands this login a list of modules it may open. Nobody is locked out if
+   the list is missing (older session payload), so the guard degrades to "allow". */
+function allowedModules() {
+  const m = (APP.session && APP.session.modules) || APP.user.modules;
+  return Array.isArray(m) && m.length ? m : null;
+}
+function canOpenModule(mod) { const m = allowedModules(); return !m || m.includes(mod); }
+function moduleLabel(mod) { return (MODULE_TITLES[mod] || [mod])[0]; }
 function hideEl(id) { const el = document.getElementById(id); if (el) el.classList.add('hidden'); }
 function dash(v, alt = '—') { return (v === null || v === undefined || v === '' || v === '-') ? alt : esc(v); }
 
@@ -203,6 +211,10 @@ const LOADERS = {
 let currentModule = 'home';
 
 function switchModule(mod) {
+  if (!canOpenModule(mod)) {
+    toast(`${moduleLabel(mod)} is only available to HR Admins`, 'warn');
+    mod = 'home';
+  }
   if (!document.getElementById('module-' + mod)) mod = 'home';
   currentModule = mod;
   $$('.module-section').forEach(s => s.classList.toggle('active', s.id === 'module-' + mod));
@@ -218,10 +230,74 @@ function switchModule(mod) {
 }
 
 function applyRoleGating() {
+  // nav: show only the modules this login was granted
+  const mine = allowedModules();
+  if (mine) $$('a[data-module]').forEach(a => {
+    const on = mine.includes(a.dataset.module);
+    if (on) { a.style.display = ''; a.classList.remove('hidden'); }
+    else { a.style.display = 'none'; a.classList.add('hidden'); }
+  });
+  // a sidebar group with nothing left in it takes its heading along
+  const seen = new Set();
+  $$('a[data-module]').forEach(a => {
+    const group = a.parentElement && a.parentElement.parentElement;
+    if (!group || group.tagName !== 'DIV' || seen.has(group)) return;
+    seen.add(group);
+    const links = $$('a[data-module]', group);
+    group.classList.toggle('hidden', links.length > 0 && links.every(l => l.style.display === 'none'));
+  });
   $$('[data-admin-only]').forEach(el => {
     if (isAdmin()) { el.classList.remove('hidden'); }
     else { el.style.display = 'none'; el.classList.add('hidden'); }
   });
+  passwordNudge();
+}
+
+/* ---------------------------- sign-in security ---------------------------- */
+function passwordNudge() {
+  const main = document.querySelector('main');
+  if (!main) return;
+  const bar = $('#pwNudge');
+  const needed = !!(APP.session && APP.session.must_set_password) && !sessionStorage.getItem('ekkaa.pwDone');
+  if (needed && !bar) {
+    const el = document.createElement('div');
+    el.id = 'pwNudge';
+    el.className = 'mb-4 flex items-center gap-3 rounded-2xl border border-[#f3e2bf] bg-[#fff9ec] px-4 py-3';
+    el.innerHTML = `<i class="fas fa-key text-[#b7791f]"></i>
+      <div class="text-[12.5px] text-[#7a5c14] flex-1">You signed in with the shared HR password. Set your own so your attendance, payslips and documents stay yours alone.</div>
+      <button onclick="openPasswordModal()" class="btn btn-primary btn-xs">Set my password</button>
+      <button onclick="document.getElementById('pwNudge').remove();sessionStorage.setItem('ekkaa.pwDone','1')" class="btn btn-ghost btn-xs">Later</button>`;
+    main.insertBefore(el, main.firstChild);
+  } else if (bar && !needed) {
+    bar.remove();
+  }
+}
+function openPasswordModal() {
+  const sec = (APP.session && APP.session.security) || {};
+  const min = sec.min_length || 8;
+  const own = !!sec.has_own_password;
+  const who = (APP.session && APP.session.user && APP.session.user.email) || APP.user.email || 'this account';
+  const row = (id, label, ph) => `<div><div class="lbl">${label}</div><input id="${id}" type="password" autocomplete="${id === 'pwCur' ? 'current-password' : 'new-password'}" class="field" placeholder="${ph}" minlength="${min}"></div>`;
+  openModal('Sign-in security', `<p class="text-[12.5px] text-[#6b7085] mb-4">You sign in as <b>${esc(who)}</b> with ${own ? 'a password only you know' : 'the shared HR password'}. Passwords need at least ${min} characters.</p>
+    <div class="space-y-3">${row('pwCur', 'Current password', 'the one you used today')}${row('pwNew', 'New password', `at least ${min} characters`)}${row('pwNew2', 'Repeat the new password', 'type it once more')}</div>
+    <div class="text-[11.5px] text-[#8b8fa3] mt-3">Nobody else can set it for you, and you cannot see it afterwards - only HR can issue a replacement if you forget it.</div>`,
+    modalFootSave('submitPasswordChange()', 'Save new password'));
+}
+async function submitPasswordChange() {
+  const val = id => ((document.getElementById(id) || {}).value || '');
+  const cur = val('pwCur'), nw = val('pwNew'), nw2 = val('pwNew2');
+  const min = ((APP.session && APP.session.security) || {}).min_length || 8;
+  if (!cur) { toast('Enter your current password first', 'error'); return; }
+  if (nw.length < min) { toast(`The new password needs at least ${min} characters`, 'error'); return; }
+  if (nw !== nw2) { toast('The two new passwords do not match', 'error'); return; }
+  let r;
+  try { r = await api('/api/me/password', { method: 'POST', body: { current_password: cur, new_password: nw } }); } catch (e) { return; }
+  toast(r.message || 'Password updated', 'success');
+  if (APP.session) APP.session.must_set_password = false;
+  sessionStorage.setItem('ekkaa.pwDone', '1');
+  $('#pwNudge')?.remove();
+  closeAllModals();
+  if (currentModule === 'me') loadMe(true);
 }
 
 async function loadLookups(force) {
@@ -323,6 +399,22 @@ async function loadDashboard(refresh) {
 }
 
 function renderHomeKpis(s) {
+  if (!isAdmin()) {
+    // an employee's Home is about them: no headcount, hiring or directory numbers
+    const t = s.my_time || {}, today0 = s.today || {}, hol = today0.next_holiday;
+    $('#homeKpis').innerHTML = [
+      kpiCard('My day', esc(t.status || 'Not clocked in'), t.clocked_in
+        ? `${(t.worked_hours || 0).toFixed(1)} h worked · in at ${esc(t.clock_in)}`
+        : esc(t.shift_label || 'Your shift'), { tone: /absent/i.test(t.status || '') ? 'bad' : 'good', onclick: "switchModule('attendance')" }),
+      kpiCard('Waiting on approval', s.pending_total, `${s.pending_leaves} leave · ${s.pending_expenses} expenses · ${s.pending_documents} documents`,
+        { tone: s.pending_total ? 'warn' : 'default', onclick: "switchModule('inbox')" }),
+      kpiCard('On leave today', s.on_leave, 'Approved leave running across Ekkaa', { onclick: "switchModule('leave')" }),
+      kpiCard('Attendance rate', `${s.attendance_rate}%`, `of ${s.expected_today} people expected in today`,
+        { tone: s.attendance_rate >= 90 ? 'good' : s.attendance_rate >= 80 ? 'warn' : 'bad' }),
+      kpiCard('Holidays ahead', today0.holidays_left || 0, hol ? `Next: ${esc(hol.name)} · ${fmtDate(hol.date)}` : 'Nothing scheduled', { onclick: "switchModule('leave')" }),
+    ].join('');
+    return;
+  }
   const rateTone = s.attendance_rate >= 90 ? 'good' : s.attendance_rate >= 80 ? 'warn' : 'bad';
   $('#homeKpis').innerHTML = [
     kpiCard('Total employees', s.total_employees, `${s.exited_employees} exited · ${s.joined_this_month} joined this month`, { onclick: "switchModule('employees')" }),
@@ -572,7 +664,31 @@ async function openEmployeeDetail(id) {
     ${(d.leave_balances || []).length ? `<div class="py-4 border-t border-[#f4f5fa]"><div class="lbl">Leave balance</div><div class="grid grid-cols-2 md:grid-cols-4 gap-3">${d.leave_balances.map(b => `<div><div class="flex justify-between text-[12px]"><span>${esc(b.name || b.leave_type)}</span><b class="num">${b.remaining}/${b.total}</b></div><div class="bar mt-1"><span style="width:${b.total ? Math.round(b.used / b.total * 100) : 0}%;background:${b.color || '#584ac0'}"></span></div></div>`).join('')}</div></div>` : ''}
     <div class="pt-4 border-t border-[#f4f5fa]"><div class="lbl">Last ${Math.min(14, (d.recent_attendance || []).length)} attendance days</div>
       ${(d.recent_attendance || []).length ? `<div class="flex flex-wrap gap-1.5">${d.recent_attendance.map(a => `<div class="px-2 py-1 rounded-lg text-[11.5px] border border-[#f1f2f8]" title="${esc(a.clock_in)} → ${esc(a.clock_out)} · ${a.work_hours}h"><span class="text-[#8b8fa3]">${fmtDayShort(a.date)}</span> ${statusPill(a.status)}</div>`).join('')}</div>` : '<div class="text-[12.5px] text-[#8b8fa3]">No attendance recorded this month.</div>'}</div>`;
-  openModal('Employee profile', body, isAdmin() ? `<button onclick="confirmDeleteEmployee('${e.id}','${esc(e.full_name)}')" class="btn btn-danger mr-auto"><i class="far fa-trash-alt"></i> Remove</button><button onclick="closeAllModals()" class="btn btn-ghost">Close</button><button onclick="openEmployeeForm('${e.id}')" class="btn btn-primary">Edit profile</button>` : `<button onclick="closeAllModals()" class="btn btn-ghost">Close</button>`, 'max-w-4xl');
+  openModal('Employee profile', body, isAdmin() ? `<button onclick="resetEmployeePassword('${e.id}','${esc(e.full_name)}')" class="btn btn-ghost mr-2"><i class="fas fa-key"></i> ${e.has_own_password ? 'Reset password' : 'Issue password'}</button><button onclick="confirmDeleteEmployee('${e.id}','${esc(e.full_name)}')" class="btn btn-danger mr-auto"><i class="far fa-trash-alt"></i> Remove</button><button onclick="closeAllModals()" class="btn btn-ghost">Close</button><button onclick="openEmployeeForm('${e.id}')" class="btn btn-primary">Edit profile</button>` : `<button onclick="closeAllModals()" class="btn btn-ghost">Close</button>`, 'max-w-4xl');
+}
+
+async function resetEmployeePassword(id, name) {
+  await confirmAction(`Issue a one-time password for ${name}? It replaces whatever they use today, so share it once and ask them to set their own in Me.`,
+    async () => {
+      const r = await api(`/api/employees/${id}/reset-password`, { method: 'POST', body: {} });
+      closeAllModals();
+      openModal(`One-time password for ${r.employee || name}`,
+        `<p class="text-[12.5px] text-[#6b7085] mb-4">This is shown once. Hand it over on a channel you trust; they replace it under <b>Me → Sign-in security</b>.</p>
+         <div class="flex items-center gap-3 bg-[#f6f7fb] rounded-xl px-4 py-3"><code id="pwTemp" class="font-mono text-[17px] tracking-wide select-all">${esc(r.temp_password)}</code>
+         <button onclick="copyTempPassword()" class="btn btn-ghost btn-xs ml-auto"><i class="far fa-copy"></i> Copy</button></div>`,
+        '<button onclick="closeAllModals()" class="btn btn-ghost">Done</button>');
+      loadEmployees(true);
+    }, 'Generate password');
+}
+function copyTempPassword() {
+  const el = $('#pwTemp');
+  if (!el) return;
+  const txt = el.textContent;
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(txt).then(() => toast('Copied', 'success'), () => toast('Select it and copy - the browser blocked the clipboard', 'warn'));
+  } else {
+    toast('Select it and copy', 'warn');
+  }
 }
 
 async function confirmDeleteEmployee(id, name) {
@@ -600,6 +716,7 @@ async function openEmployeeForm(id) {
       <div class="mt-3">${grid('md:grid-cols-3 gap-3', [f('PAN', 'pan_no'), f('UAN', 'uan_no'), f('PF number', 'pf_no'), f('Bank', 'bank_name'), f('Account number', 'bank_account_no'), f('IFSC', 'ifsc_code')].join(''))}</div></details>
     <details ${e.emergency_contact_name ? 'open' : ''} class="border border-[#f1f2f8] rounded-xl p-3"><summary class="text-[12.5px] font-semibold cursor-pointer text-[#584ac0]">Emergency contact</summary>
       <div class="mt-3">${grid('md:grid-cols-3 gap-3', [f('Name', 'emergency_contact_name'), f('Phone', 'emergency_contact_phone'), f('Relation', 'emergency_contact_relation')].join(''))}</div></details>
+    ${id ? '' : `<div class="border border-[#f1f2f8] rounded-xl p-3"><div class="lbl">First sign-in</div>${grid('md:grid-cols-2 gap-3', [f('Starter password', 'starter_password', { placeholder: 'leave empty for the shared HR password', hint: 'They are asked to replace it the first time they open Me.' })].join(''))}</div>`}
     ${id ? '' : `<div class="text-[11.5px] text-[#8b8fa3] bg-[#f6f7fb] rounded-xl p-3">A leave quota is prorated from the joining date, and a payroll structure is created from the CTC you enter.</div>`}</div>`;
   openModal(id ? `Edit ${e.full_name}` : 'Add employee', body, modalFootSave(`submitEmployeeForm('${id || ''}')`, id ? 'Save changes' : 'Create employee'));
   const ctcEl = $('#salary_ctc');
@@ -607,10 +724,11 @@ async function openEmployeeForm(id) {
 }
 
 async function submitEmployeeForm(id) {
-  const ids = ['full_name', 'email', 'personal_email', 'phone', 'gender', 'date_of_birth', 'date_of_joining', 'blood_group', 'department_id', 'designation_id', 'manager_id', 'employment_type', 'work_location', 'salary_ctc', 'status', 'address', 'nationality', 'pan_no', 'uan_no', 'pf_no', 'bank_name', 'bank_account_no', 'ifsc_code', 'employee_code', 'emergency_contact_name', 'emergency_contact_phone', 'emergency_contact_relation'];
+  const ids = ['full_name', 'email', 'personal_email', 'phone', 'gender', 'date_of_birth', 'date_of_joining', 'blood_group', 'department_id', 'designation_id', 'manager_id', 'employment_type', 'work_location', 'salary_ctc', 'status', 'address', 'nationality', 'pan_no', 'uan_no', 'pf_no', 'bank_name', 'bank_account_no', 'ifsc_code', 'employee_code', 'emergency_contact_name', 'emergency_contact_phone', 'emergency_contact_relation', 'starter_password'];
   const v = formValues(ids);
   needValue('full_name', 'Name is required'); needValue('email', 'Work email is required');
   if (v.salary_ctc) v.salary_ctc = num(v.salary_ctc);
+  if ('starter_password' in v && !v.starter_password) delete v.starter_password;
   ['department_id', 'designation_id', 'manager_id'].forEach(k => { if (!v[k]) delete v[k]; });
   Object.keys(v).forEach(k => { if (v[k] === null || v[k] === '') delete v[k]; });
   try {
@@ -681,6 +799,18 @@ async function loadMe(refresh) {
         })())}
         ${(d.goals || []).length ? card('Active goals', 'From your current cycle', `<div class="space-y-2.5">${d.goals.map(g2 => `<div><div class="flex items-center justify-between text-[12.5px]"><span class="font-medium truncate pr-3">${esc(g2.title)}</span><span class="text-[#8b8fa3] num">${g2.progress}% · ${esc(g2.health_label)}</span></div><div class="bar mt-1"><span style="width:${g2.progress}%;background:${g2.health === 'on_track' ? '#0f9d58' : g2.health === 'achieved' ? '#584ac0' : '#f5a623'}"></span></div></div>`).join('')}</div>`) : ''}
         ${(d.timesheets || []).length ? card('Recent timesheets', '', `<div class="space-y-1.5">${d.timesheets.map(t => `<div class="flex items-center gap-2 text-[12.5px]"><span>${esc(t.week_starting)} → ${esc(t.week_label || '')}</span><span class="ml-auto num text-[#6b7085]">${num(t.total_hours)} h</span>${statusPill(t.status)}</div>`).join('')}</div>`) : ''}
+        ${card('Sign-in security', 'How you get into Ekkaa', (() => {
+          const sec = (APP.session && APP.session.security) || {};
+          const own = !!sec.has_own_password;
+          const who = (APP.session && APP.session.user && APP.session.user.email) || APP.user.email || '—';
+          return `<div class="flex items-start gap-3">
+            <div class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style="background:${own ? '#e6f9f0' : '#fff4e6'};color:${own ? '#0f9d58' : '#b7791f'}"><i class="fas ${own ? 'fa-shield-alt' : 'fa-key'} text-[13px]"></i></div>
+            <div class="min-w-0 flex-1">
+              <div class="text-[13px] font-medium">${own ? 'You sign in with a password only you know' : 'You are still on the shared HR password'}</div>
+              <div class="text-[11.5px] text-[#8b8fa3] mt-0.5">Signed in as ${esc(who)} · minimum ${esc(sec.min_length || 8)} characters. ${own ? 'Change it whenever you like.' : 'Set your own so nobody else can open this account.'}</div>
+            </div></div>
+            <div class="mt-3"><button onclick="openPasswordModal()" class="btn btn-ghost btn-xs"><i class="fas fa-lock"></i> ${own ? 'Change password' : 'Set my password'}</button></div>`;
+        })())}
       </div>
     </div>`;
   root.dataset.loaded = '1';
