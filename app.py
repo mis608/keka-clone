@@ -10,6 +10,7 @@ Works in two modes with the exact same routes:
 import io
 import json
 import os
+import secrets
 import re
 import uuid
 import csv
@@ -20,6 +21,7 @@ from dotenv import load_dotenv
 from flask import (Flask, render_template, request, jsonify, session, redirect,
                    url_for, flash, g, send_from_directory, Response)
 from flask_cors import CORS
+from werkzeug.security import check_password_hash, generate_password_hash
 
 load_dotenv()
 
@@ -76,6 +78,17 @@ DEFAULT_EMPLOYEE_EMAIL = os.getenv("DEFAULT_EMPLOYEE_EMAIL", "aarav.sharma@compa
 if not os.getenv("ADMIN_EMAILS") or ADMIN_PASSWORD == "demo123":
     print("[WARN] Default credentials in use (ADMIN_EMAILS=admin@company.com / ADMIN_PASSWORD=demo123).")
 
+MIN_PASSWORD_LENGTH = max(6, int(os.getenv("MIN_PASSWORD_LENGTH", "8")))
+
+# --------------------------------------------------------------------- who sees what
+# One access map for the whole app: the sidebar template, the browser module guard and the API
+# decorators all read these lists, so a screen can never be hidden in one place and still be
+# reachable in another. Employees get a self-service workspace; HR Admins get everything.
+EMPLOYEE_MODULES = ["home", "me", "inbox", "attendance", "leave", "timesheet", "payroll",
+                    "expenses", "documents", "performance", "orgchart"]
+ADMIN_MODULES = ["employees", "hiring", "reports"]
+ALL_MODULES = EMPLOYEE_MODULES + ADMIN_MODULES
+
 # What an employee may change on their own profile in the Me section.
 SELF_EDITABLE_FIELDS = {"phone", "personal_email", "address", "blood_group", "emergency_contact_name",
                         "emergency_contact_phone", "emergency_contact_relation", "work_location"}
@@ -91,6 +104,7 @@ SUPA_COLUMNS = {
                   "employment_type", "work_location", "status", "salary_ctc", "blood_group", "nationality",
                   "address", "pan_no", "uan_no", "pf_no", "bank_name", "bank_account_no", "ifsc_code",
                   "emergency_contact_name", "emergency_contact_phone", "emergency_contact_relation",
+                  "password_hash",
                   "exit_date", "exit_reason"},
     "attendance": {"employee_id", "date", "clock_in", "clock_out", "work_hours", "break_minutes", "status",
                    "shift_id", "location", "note", "is_late", "regularization_status", "regularization_reason"},
@@ -349,10 +363,10 @@ def _friendly_db_error(exc):
     text = str(exc)
     lowered = text.lower()
     if "column" in lowered and "does not exist" in lowered or "could not find the" in lowered:
-        return ("Your database is missing a column this version needs. Run supabase_migrate.sql "
+        return ("Your database is missing a column this version needs. Run supabase_setup.sql "
                 "in the Supabase SQL editor, then reload the page.")
     if "relation" in lowered and "does not exist" in lowered:
-        return "A table is missing. Run supabase_migrate.sql in the Supabase SQL editor first."
+        return "A table is missing. Run supabase_setup.sql in the Supabase SQL editor first."
     if "invalid input syntax for type uuid" in lowered:
         return "A record points at a row that no longer exists. Re-save it with a valid selection."
     if "duplicate key" in lowered:
@@ -522,6 +536,7 @@ def enrich_employee_row(emp):
     row["date_of_birth_label"] = fmt_day(row.get("date_of_birth"), "%d %b")
     if row.get("exit_date"):
         row["status"] = "Exited"
+    row["has_own_password"] = bool(row.pop("password_hash", None))   # the hash never leaves the server
     return row
 
 
@@ -589,15 +604,63 @@ def admin_required(f):
     return decorated
 
 
+# /api/login-hint is the one API route the sign-in page may call before logging in, and only in demo mode.
+PUBLIC_API_PATHS = {"/api/health", "/api/login-hint"}
+
+
 @app.before_request
 def require_auth_for_api():
-    if request.path.startswith("/api/") and request.path != "/api/health":
+    if request.path.startswith("/api/") and request.path not in PUBLIC_API_PATHS:
         if "user" not in session:
             return jsonify({"success": False, "error": "Authentication required - please log in"}), 401
 
 
 def is_admin():
     return (session.get("user") or {}).get("role") == "HR Admin"
+
+
+def modules_for_role(role):
+    return list(ALL_MODULES) if role == "HR Admin" else list(EMPLOYEE_MODULES)
+
+
+def allowed_modules():
+    return modules_for_role((session.get("user") or {}).get("role"))
+
+
+def verify_employee_password(emp, password):
+    """The employee's own hash once they have set one; the shared bootstrap password until then.
+
+    The fallback is what keeps the demo (and any account HR has not onboarded to passwords yet)
+    signing in, while every account that sets its own stops sharing the bootstrap one.
+    """
+    if not password:
+        return False
+    stored = (emp or {}).get("password_hash") or ""
+    if stored:
+        try:
+            return check_password_hash(stored, password)
+        except Exception:                                     # hash written by another tool/version
+            return False
+    return password == EMPLOYEE_PASSWORD
+
+
+def has_own_password(emp):
+    return bool((emp or {}).get("password_hash"))
+
+
+def new_temp_password():
+    alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789"
+    return "Ekkaa-" + "".join(secrets.choice(alphabet) for _ in range(8))
+
+
+def hr_area(f):
+    """For the areas of the app an employee must not reach at all (directory, hiring, reports)."""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not is_admin():
+            raise ApiError("This area is for HR Admins. Ask HR if you need this information.", 403)
+        return f(*args, **kwargs)
+    return decorated
 
 
 def current_employee():
@@ -672,11 +735,13 @@ def login():
             return redirect(url_for("login"))
 
         emp = next((e for e in db_list("employees") if (e.get("email") or "").strip().lower() == email), None)
+        if emp is not None and (emp.get("status") or "Active") == "Exited":
+            return _fail("This account is not active any more. Contact HR if you need access back.")
         if email in ADMIN_EMAILS:
-            if password != ADMIN_PASSWORD:
+            if password != ADMIN_PASSWORD and not verify_employee_password(emp, password):
                 return _fail()
             role = "HR Admin"
-        elif emp is not None and password == EMPLOYEE_PASSWORD:
+        elif emp is not None and verify_employee_password(emp, password):
             role = "Employee"
         else:
             return _fail()
@@ -687,11 +752,13 @@ def login():
                            "employee_id": (emp or {}).get("id"),
                            "department": dept_map().get(str((emp or {}).get("department_id")), ""),
                            "designation": designation_map().get(str((emp or {}).get("designation_id")), ""),
-                           "employee_code": (emp or {}).get("employee_code")}
+                           "employee_code": (emp or {}).get("employee_code"),
+                           "modules": modules_for_role(role),
+                           "must_set_password": role == "Employee" and not has_own_password(emp)}
         if request.is_json:
             return jsonify({"success": True, "redirect": "/dashboard", "role": role})
         return redirect(url_for("dashboard"))
-    return render_template("login.html")
+    return render_template("login.html", mock_mode=supabase is None)
 
 
 @app.route("/logout")
@@ -713,6 +780,7 @@ def dashboard():
     user["employee_code"] = user.get("employee_code") or emp.get("employee_code") or "-"
     user["avatar"] = user.get("avatar") or initials(user.get("full_name"))
     user["mock_mode"] = supabase is None
+    user.setdefault("modules", allowed_modules())
     return render_template("dashboard.html", user=user)
 
 
@@ -721,7 +789,23 @@ def dashboard():
 def api_session():
     emp = current_employee()
     return jsonify({"user": session.get("user"), "is_admin": is_admin(),
+                    "modules": allowed_modules(),
+                    "must_set_password": bool((session.get("user") or {}).get("must_set_password")),
+                    "security": {"has_own_password": has_own_password(emp), "min_length": MIN_PASSWORD_LENGTH},
                     "employee": employee_display((emp or {}).get("id")), "mock_mode": supabase is None})
+
+
+@app.route("/api/login-hint")
+def api_login_hint():
+    """Demo-mode convenience for the sign-in page: one employee email that exists in the sample data.
+    Never reveals a password, and returns nothing at all once the app is on a real database."""
+    if supabase is not None:
+        return jsonify({"email": None, "name": None})
+    for e in db_list("employees", order="full_name"):
+        email = str(e.get("email") or "").strip().lower()
+        if email and e.get("status") == "Active" and email not in ADMIN_EMAILS:
+            return jsonify({"email": email, "name": e.get("full_name")})
+    return jsonify({"email": None, "name": None})
 
 
 @app.route("/api/health")
@@ -822,6 +906,19 @@ def api_stats():
     open_jobs = [j for j in jobs if j.get("status") == "Open"]
     open_positions = sum(int(j.get("openings") or 0) for j in open_jobs)
     applicants = len([c for c in db_list("candidates") if c.get("stage") not in ("Rejected", "Hired")])
+
+    if not is_admin():
+        # An employee's counters describe their own queue, so the Inbox badge, the "waiting on
+        # approval" card and the list the inbox renders cannot disagree with each other.
+        me_id = str(acting_employee_id() or "")
+
+        def _mine(rows):
+            return [r for r in rows if str(r.get("employee_id")) == me_id]
+        pending_leaves = _mine(pending_leaves)
+        pending_regs = _mine(pending_regs)
+        pending_expenses = _mine(pending_expenses)
+        pending_docs = _mine(pending_docs)
+        ts_pending = _mine(ts_pending)
 
     lt_map, emp_map = leave_type_map(), employees_map()
 
@@ -1078,6 +1175,7 @@ def api_announcement_update(row_id):
 
 # =================================================================== employees
 @app.route("/api/employees")
+@hr_area
 def api_employees():
     filters = {}
     if request.args.get("department_id"):
@@ -1096,6 +1194,7 @@ def api_employees():
 
 
 @app.route("/api/employees/export")
+@hr_area
 def api_employees_export():
     rows = [enrich_employee_row(e) for e in db_list("employees", order="full_name")]
     cols = ["employee_code", "full_name", "email", "phone", "gender", "date_of_birth", "date_of_joining",
@@ -1167,9 +1266,17 @@ def api_employee_create():
     row = {k: v for k, v in data.items() if k in EMPLOYEE_FIELDS}
     row.update({"email": email, "employee_code": code, "avatar": initials(data["full_name"].strip()),
                 "status": data.get("status") or "Active", "date_of_joining": data.get("date_of_joining") or str(today())})
+    starter = (data.get("starter_password") or "").strip()
+    if starter:
+        if len(starter) < MIN_PASSWORD_LENGTH:
+            raise ApiError(f"A starter password needs at least {MIN_PASSWORD_LENGTH} characters")
+        row["password_hash"] = generate_password_hash(starter)
     created = db_insert("employees", row)
     seed_leave_balances(created)
-    return jsonify({"success": True, "employee": enrich_employee_row(created), "message": "Employee added to the directory"})
+    return jsonify({"success": True, "employee": enrich_employee_row(created),
+                    "message": f"{row['full_name']} can sign in with "
+                               + (f"{email} and the starter password you set" if starter
+                                  else f"{email} and the shared demo password, and should set their own in Me")})
 
 
 def next_employee_code():
@@ -2245,6 +2352,45 @@ def api_me_update():
     return api_employee_update(acting_employee_id() or "")
 
 
+@app.route("/api/me/password", methods=["POST"])
+def api_me_password():
+    """Change your own password. The current one is always verified, including on the
+    shared bootstrap password, so nobody can be locked in by someone else."""
+    data = request.get_json(silent=True) or {}
+    emp = current_employee()
+    if not emp:
+        raise ApiError("This login is not linked to an employee record, so there is no password here to change")
+    current = data.get("current_password") or ""
+    new = data.get("new_password") or ""
+    if not verify_employee_password(emp, current):
+        raise ApiError("That is not your current password", 403)
+    if len(new) < MIN_PASSWORD_LENGTH:
+        raise ApiError(f"Use at least {MIN_PASSWORD_LENGTH} characters for the new password")
+    if new == current:
+        raise ApiError("The new password has to be different from the current one")
+    db_update("employees", emp["id"], {"password_hash": generate_password_hash(new)})
+    user = session.get("user") or {}
+    user["must_set_password"] = False
+    session["user"] = user
+    return jsonify({"success": True, "message": "Password updated - use it next time you sign in"})
+
+
+@app.route("/api/employees/<row_id>/reset-password", methods=["POST"])
+@admin_required
+def api_employee_reset_password(row_id):
+    """HR hands out a one-time password; the employee replaces it in Me."""
+    emp = db_get("employees", row_id)
+    if not emp:
+        raise ApiError("Employee not found", 404)
+    temp = (request.get_json(silent=True) or {}).get("password") or new_temp_password()
+    if len(temp) < MIN_PASSWORD_LENGTH:
+        raise ApiError(f"A temporary password needs at least {MIN_PASSWORD_LENGTH} characters")
+    db_update("employees", emp["id"], {"password_hash": generate_password_hash(temp)})
+    who = (employee_display(emp["id"]) or {}).get("full_name") or "They"
+    return jsonify({"success": True, "temp_password": temp, "employee": who,
+                    "message": f"{who} can sign in with this password now - share it once and ask them to change it"})
+
+
 @app.route("/api/employees/<row_id>/self-edit-fields")
 @admin_required
 def api_employee_self_fields(row_id):
@@ -2727,6 +2873,7 @@ def enrich_job(job, candidates=None):
 
 
 @app.route("/api/jobs")
+@hr_area
 def api_jobs():
     rows = db_list("jobs", order="posted_at", descending=True)
     cands = db_list("candidates")
@@ -2813,6 +2960,7 @@ def enrich_candidate(c):
 
 
 @app.route("/api/candidates")
+@hr_area
 def api_candidates():
     filters = {}
     if request.args.get("job_id"):
@@ -2930,6 +3078,7 @@ def api_candidate_hire(row_id):
 
 
 @app.route("/api/hiring/pipeline")
+@hr_area
 def api_hiring_pipeline():
     cands = db_list("candidates")
     jobs = db_list("jobs")
@@ -3323,6 +3472,7 @@ def _in_dept(emp_id, department):
 
 
 @app.route("/api/reports")
+@hr_area
 def api_reports_list():
     return jsonify([
         {"id": "headcount", "name": "Headcount & Attrition", "module": "Employee", "icon": "👥",
@@ -3355,6 +3505,7 @@ def api_reports_list():
 
 
 @app.route("/api/reports/<name>")
+@hr_area
 def api_report(name):
     frm, to = _period(request.args)
     department = request.args.get("department") or None
@@ -3882,22 +4033,34 @@ def api_pending_action(kind, row_id):
 
 
 # =================================================================== misc exports & demo
+# Modules in /api/export that an employee may use, and then only for their own rows.
+SELF_EXPORT_MODULES = {"attendance", "leave", "payroll"}
+
+
 @app.route("/api/export/<module>")
-@admin_required
 def api_export(module):
+    admin = is_admin()
+    if not admin and module not in SELF_EXPORT_MODULES:
+        raise ApiError(f"The {module} export is available to HR Admins", 403)
+    scope_to = None if admin else acting_employee_id()
+
+    def own(rows, key="employee_id"):
+        return rows if not scope_to else [r for r in rows if str(r.get(key)) == str(scope_to)]
+
     emps = [enrich_employee_row(e) for e in db_list("employees")]
+
     if module == "employees":
         return api_employees_export()
     if module == "attendance":
-        rows = [enrich_attendance_row(a) for a in db_list("attendance")]
+        rows = own([enrich_attendance_row(a) for a in db_list("attendance")])
         return csv_response("attendance", ["employee_name", "employee_code", "date", "clock_in_label", "clock_out_label",
                                            "work_hours", "status", "location", "regularization_status"], rows)
     if module == "leave":
-        rows = [enrich_leave_row(l) for l in db_list("leave_requests")]
+        rows = own([enrich_leave_row(l) for l in db_list("leave_requests")])
         return csv_response("leave_requests", ["employee_name", "leave_type_label", "start_date", "end_date", "days",
                                                 "status", "reason", "admin_remark"], [{**r, "employee_name": (r.get("employee") or {}).get("full_name")} for r in rows])
     if module == "payroll":
-        rows = [enrich_payslip(p) for p in db_list("payslips")]
+        rows = own([enrich_payslip(p) for p in db_list("payslips")])
         return csv_response("payslips", ["period_label", "employee_name", "gross_earnings", "total_deductions", "net_pay", "status"],
                             [{**r, "employee_name": (r.get("employee") or {}).get("full_name")} for r in rows])
     if module == "hiring":
