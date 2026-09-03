@@ -151,7 +151,7 @@
       <div>
         <div class="text-[11px] font-semibold tracking-widest text-white/30 uppercase px-3 mb-2">Organization</div>
         <div class="space-y-1">
-          <a data-module="employees" class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13.5px] font-medium text-white/70 hover:bg-white/[0.06] hover:text-white transition cursor-pointer"><i class="fas fa-users w-5 text-white/40"></i> Employees</a>
+          {% if user.is_admin %}<a data-module="employees" class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13.5px] font-medium text-white/70 hover:bg-white/[0.06] hover:text-white transition cursor-pointer"><i class="fas fa-users w-5 text-white/40"></i> Employees</a>{% endif %}
           <a data-module="orgchart" class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13.5px] font-medium text-white/70 hover:bg-white/[0.06] hover:text-white transition cursor-pointer"><i class="fas fa-sitemap w-5 text-white/40"></i> Org Chart</a>
           <a data-module="documents" class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13.5px] font-medium text-white/70 hover:bg-white/[0.06] hover:text-white transition cursor-pointer"><i class="far fa-folder w-5 text-white/40"></i> Documents <span id="docBadge" class="ml-auto bg-white/10 text-white/70 text-[10px] px-1.5 py-0.5 rounded-full font-semibold hidden">0</span></a>
         </div>
@@ -174,9 +174,9 @@
       <div>
         <div class="text-[11px] font-semibold tracking-widest text-white/30 uppercase px-3 mb-2">Talent</div>
         <div class="space-y-1">
-          <a data-module="hiring" data-admin-only class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13.5px] font-medium text-white/70 hover:bg-white/[0.06] hover:text-white transition cursor-pointer"><i class="fas fa-briefcase w-5 text-white/40"></i> Hiring</a>
+          {% if user.is_admin %}<a data-module="hiring" data-admin-only class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13.5px] font-medium text-white/70 hover:bg-white/[0.06] hover:text-white transition cursor-pointer"><i class="fas fa-briefcase w-5 text-white/40"></i> Hiring</a>{% endif %}
           <a data-module="performance" class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13.5px] font-medium text-white/70 hover:bg-white/[0.06] hover:text-white transition cursor-pointer"><i class="fas fa-bullseye w-5 text-white/40"></i> Performance</a>
-          <a data-module="reports" data-admin-only class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13.5px] font-medium text-white/70 hover:bg-white/[0.06] hover:text-white transition cursor-pointer"><i class="fas fa-chart-bar w-5 text-white/40"></i> Reports</a>
+          {% if user.is_admin %}<a data-module="reports" data-admin-only class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13.5px] font-medium text-white/70 hover:bg-white/[0.06] hover:text-white transition cursor-pointer"><i class="fas fa-chart-bar w-5 text-white/40"></i> Reports</a>{% endif %}
         </div>
       </div>
     </nav>
@@ -341,7 +341,7 @@
         <div class="flex items-center gap-1 bg-white border border-[#eef0f6] rounded-xl p-1 w-fit">
           <div class="keka-tab active" data-doctab="files" onclick="setDocTab('files')">Document vault</div>
           <div class="keka-tab" data-doctab="requests" onclick="setDocTab('requests')">Requests <span id="docReqCount" class="pill bg-[#f6f7fb] text-[#8b8fa3] ml-1">0</span></div>
-          <div class="keka-tab" data-doctab="compliance" onclick="setDocTab('compliance')">Compliance</div>
+          <div class="keka-tab" data-doctab="compliance" data-admin-only onclick="setDocTab('compliance')">Compliance</div>
         </div>
         <div class="sub-tab active" data-doctabpane="files">
           <div class="grid grid-cols-2 md:grid-cols-6 gap-4 mb-5" id="docStats"></div>
@@ -448,7 +448,7 @@
             <div class="keka-tab active" data-tstab="mine" onclick="setTsTab('mine')">My week</div>
             <div class="keka-tab" data-tstab="team" data-admin-only onclick="setTsTab('team')">Team</div>
             <div class="keka-tab" data-tstab="history" onclick="setTsTab('history')">History</div>
-            <div class="keka-tab" data-tstab="projects" onclick="setTsTab('projects')">Projects</div>
+            <div class="keka-tab" data-tstab="projects" data-admin-only onclick="setTsTab('projects')">Projects</div>
           </div>
           <div class="flex items-center gap-2 ml-auto">
             <button onclick="exportCsv('/api/timesheet/export')" class="btn btn-ghost btn-xs"><i class="fas fa-file-csv"></i> CSV</button>
