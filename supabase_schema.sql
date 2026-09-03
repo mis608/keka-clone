@@ -95,6 +95,7 @@ create table if not exists employees (
   manager_id uuid,
   nationality text default 'Indian',
   pan_no text,
+  password_hash text,
   personal_email text,
   pf_no text,
   phone text,
@@ -133,6 +134,7 @@ alter table employees add column if not exists ifsc_code text;
 alter table employees add column if not exists manager_id uuid;
 alter table employees add column if not exists nationality text;
 alter table employees add column if not exists pan_no text;
+alter table employees add column if not exists password_hash text;
 alter table employees add column if not exists personal_email text;
 alter table employees add column if not exists pf_no text;
 alter table employees add column if not exists phone text;
