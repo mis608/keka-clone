@@ -398,6 +398,21 @@ def fmt_day(value, fmt="%d %b %Y"):
     return out.replace(" 0", " ") if "%d" in fmt else out
 
 
+def norm_time(value):
+    """`09:12` from an <input type=time> or a stray label -> the `HH:MM:SS` the TIME column keeps.
+
+    Without this, a row edited through the UI holds "09:12" while every other row holds
+    "09:12:00", and the two modes (Postgres normalises, the demo store does not) then disagree.
+    """
+    if value in (None, ""):
+        return None
+    text = str(value).strip()
+    m = re.match(r"^(\d{1,2}):(\d{2})(?::(\d{2}))?", text)
+    if not m:
+        return text
+    return f"{int(m.group(1)) % 24:02d}:{m.group(2)}:{m.group(3) or '00'}"
+
+
 def fmt_time(value, fallback="-"):
     """Accept an ISO timestamp, a bare HH:MM[:SS] time, or a legacy '09:32 AM' label."""
     if not value:
@@ -1814,15 +1829,23 @@ def api_document_request_update(row_id):
 
 
 # =================================================================== attendance
-def month_first(month_str):
-    y, m = [int(x) for x in str(month_str)[:7].split("-")]
-    return date(y, m, 1)
+def month_bounds(month_str):
+    """(first, last) day of a `YYYY-MM` period - or a 400, never a 500 from a bad filter.
 
-
-def month_last(month_str):
-    first = month_first(month_str)
+    The picker sends `2026-09`; a hand-typed URL sends `2026/9`. Both are fine. `nonsense`,
+    `13` and `2026-13` used to reach `int()`/`date()` and come back as an internal error,
+    because the old helper unpacked a dash and `date()` rejects month 13 - so a junk filter
+    on /api/attendance/summary was a 500 while the screen itself looked perfectly healthy.
+    """
+    bits = [b for b in re.split(r"[^0-9]+", str(month_str or "").strip()) if b]
+    if len(bits) < 2:
+        raise ApiError("Month filter must look like 2026-09")
+    try:
+        first = date(int(bits[0]), int(bits[1]), 1)
+    except ValueError:
+        raise ApiError("Month filter must look like 2026-09")
     nxt = date(first.year + 1, 1, 1) if first.month == 12 else date(first.year, first.month + 1, 1)
-    return nxt - timedelta(days=1)
+    return first, nxt - timedelta(days=1)
 
 
 def enrich_attendance_row(a, employees=None):
@@ -1849,12 +1872,13 @@ def enrich_attendance_row(a, employees=None):
 def api_attendance():
     emp_id = scoped_employee_id()
     month = request.args.get("month") or today().strftime("%Y-%m")
-    try:
-        first, last = month_first(month), month_last(month)
-    except (ValueError, AttributeError):
-        raise ApiError("Month filter must look like 2026-09")
-    if request.args.get("from"):
-        first, last = parse_day(request.args["from"]), parse_day(request.args.get("to") or request.args["from"])
+    first, last = month_bounds(month)
+    if request.args.get("from") or request.args.get("to"):
+        start = parse_day(request.args.get("from") or request.args.get("to"))
+        end = parse_day(request.args.get("to") or request.args.get("from"))
+        if not start or not end:
+            raise ApiError("from/to must look like 2026-09-01")
+        first, last = (start, end) if start <= end else (end, start)
     filters = {"date": (">=", str(first))}
     if emp_id:
         filters["employee_id"] = emp_id
@@ -1871,7 +1895,7 @@ def api_attendance():
 def api_attendance_summary():
     emp_id = request.args.get("employee_id") or (None if is_admin() else acting_employee_id())
     month = request.args.get("month") or today().strftime("%Y-%m")
-    first, last = month_first(month), month_last(month)
+    first, last = month_bounds(month)
     filters = {"date": (">=", str(first))}
     if emp_id:
         filters["employee_id"] = emp_id
@@ -1921,22 +1945,35 @@ def api_attendance_clock():
     existing = next((r for r in db_list("attendance", {"employee_id": employee_id, "date": today_s})), None)
     stamp = now.strftime("%H:%M:%S")
     if action in ("in", "clock_in"):
-        if existing and existing.get("clock_in") and not existing.get("clock_out"):
-            raise ApiError(f"You are already clocked in since {fmt_time(existing.get('clock_in'))}")
+        ci = (existing or {}).get("clock_in")
+        co = (existing or {}).get("clock_out")
+        # a row left over from before the one-punch-per-day rule: out recorded before in. Reopen it
+        # instead of leaving the person stuck with a clock-out they cannot undo or complete.
+        broken = bool(ci and co and (minutes_of(co) or 0) < (minutes_of(ci) or 0))
+        if ci and not co:
+            raise ApiError(f"You are already clocked in since {fmt_time(ci)}")
+        if ci and co and not broken:
+            raise ApiError(f"Today is already closed - in {fmt_time(ci)}, out {fmt_time(co)}. "
+                           "If a punch is wrong, use Attendance -> Regularization or ask HR to edit the record.")
         late = (now.hour * 60 + now.minute) > (minutes_of(shift.get("start_time")) or 570) + grace
         payload = {"employee_id": employee_id, "date": today_s, "clock_in": stamp,
                    "status": "Present", "is_late": bool(late), "location": data.get("location") or "Office",
                    "shift_id": shift.get("id"), "break_minutes": 0, "work_hours": 0,
                    "note": "Self clock-in" if not data.get("location") else f"Clock-in from {data.get('location')}"}
+        if broken:
+            payload["clock_out"] = None
+            payload["note"] = "Reopened: the recorded clock-out was before the clock-in"
         row = db_update("attendance", existing["id"], payload) if existing else db_insert("attendance", payload)
         return jsonify({"success": True, "action": "in", "time": fmt_time(stamp), "late": bool(late),
                         "attendance": enrich_attendance_row(row),
-                        "message": f"Clocked in at {fmt_time(stamp)}" + (" - you are marked late" if late else "")})
+                        "message": f"Clocked in at {fmt_time(stamp)}" + (" - you are marked late" if late else "")
+                                   + (" - the broken record for today was reopened" if broken else "")})
     if action in ("out", "clock_out"):
         if not existing or not existing.get("clock_in"):
             raise ApiError("You need to clock in first")
-        if existing.get("clock_out"):
-            raise ApiError(f"You already clocked out at {fmt_time(existing.get('clock_out'))}")
+        if existing.get("clock_out") and (minutes_of(existing.get("clock_in")) or 0) <= (minutes_of(existing.get("clock_out")) or 0):
+            raise ApiError(f"You already clocked out at {fmt_time(existing.get('clock_out'))} - today is closed. "
+                           "Ask HR to edit the record if the time is wrong.")
         start = minutes_of(existing.get("clock_in")) or 0
         end = max(now.hour * 60 + now.minute, start)
         brk = int(money(existing.get("break_minutes") or 45))
@@ -1962,16 +1999,23 @@ def api_attendance_entry():
     if status not in ("Present", "Absent", "Half Day", "Work From Home", "On Leave"):
         raise ApiError(f"'{status}' is not a valid attendance status")
     existing = next((r for r in db_list("attendance", {"employee_id": employee_id, "date": day})), None)
-    ci, co = data.get("clock_in"), data.get("clock_out")
+    ci, co = norm_time(data.get("clock_in")), norm_time(data.get("clock_out"))
     hours = money(data.get("work_hours"))
     if ci and co and not hours:
         ci_min, co_min = minutes_of(ci), minutes_of(co)
         if ci_min is not None and co_min is not None:
             hours = round(max(0.0, (co_min - ci_min - int(money(data.get("break_minutes") or 45)))) / 60, 1)
+    # a corrected punch also moves the late mark, or the day stays "late" forever
+    late_min = minutes_of(ci) if ci else minutes_of((existing or {}).get("clock_in"))
+    shift = shift_row()
+    start_min = minutes_of(shift.get("start_time")) or 570
+    is_late = late_min > start_min + int(shift.get("grace_minutes") or 15) if late_min is not None else None
     payload = {"employee_id": employee_id, "date": str(day)[:10], "status": status,
                "clock_in": ci or None, "clock_out": co or None, "work_hours": hours,
                "break_minutes": int(money(data.get("break_minutes") or 0)), "location": data.get("location"),
                "note": data.get("note"), "regularization_status": "Approved" if data.get("via_regularization") else (existing or {}).get("regularization_status") or "None"}
+    if is_late is not None:
+        payload["is_late"] = is_late
     row = db_update("attendance", existing["id"], payload) if existing else db_insert("attendance", payload)
     return jsonify({"success": True, "attendance": enrich_attendance_row(row),
                     "message": f"Attendance for {employee_display(employee_id)['full_name']} on {fmt_day(day)} updated"})
@@ -2055,20 +2099,42 @@ def api_regularization_action(row_id):
     day = str(reg.get("date"))[:10]
     att = next((a for a in db_list("attendance", {"employee_id": reg.get("employee_id"), "date": day})), None)
     if action == "approve":
-        hours = 0.0
-        if reg.get("clock_in_correction") or reg.get("clock_out_correction"):
-            comin, cimin = reg.get("clock_in_correction"), reg.get("clock_out_correction")
-            hours = round(max(0.0, ((minutes_of(cimin) if cimin else 18 * 60) - (minutes_of(comin) if comin else 9 * 60 + 30) - 45)) / 60, 1)
+        shift = shift_row()
+        start_min = minutes_of(shift.get("start_time")) or 570
+        end_min = minutes_of(shift.get("end_time")) or 1110
+        grace = int(shift.get("grace_minutes") or 15)
+        brk = int(money((att or {}).get("break_minutes") or 45))
+        # a correction only replaces the punch it names; the rest of the day stays as recorded
+        comin = reg.get("clock_in_correction") or (att or {}).get("clock_in")
+        cimin = reg.get("clock_out_correction") or (att or {}).get("clock_out")
         payload = {"regularization_status": "Approved", "status": att.get("status") if att else "Present",
                    "note": (f"Regularized: {reg.get('reason') or ''}").strip()[:200]}
         if reg.get("clock_in_correction"):
-            payload["clock_in"] = str(reg["clock_in_correction"])[:8] if len(str(reg["clock_in_correction"])) > 5 else reg["clock_in_correction"]
-            payload["is_late"] = (minutes_of(payload["clock_in"]) or 570) > 600
+            payload["clock_in"] = norm_time(reg["clock_in_correction"])
+            payload["is_late"] = (minutes_of(payload["clock_in"]) or start_min) > start_min + grace
         if reg.get("clock_out_correction"):
-            payload["clock_out"] = str(reg["clock_out_correction"])[:8] if len(str(reg["clock_out_correction"])) > 5 else reg["clock_out_correction"]
+            payload["clock_out"] = norm_time(reg["clock_out_correction"])
+        hours = 0.0
+        if reg.get("clock_in_correction") or reg.get("clock_out_correction"):
+            in_m = minutes_of(payload.get("clock_in") or comin)
+            out_m = minutes_of(payload.get("clock_out") or cimin)
+            hours = round(max(0.0, ((out_m if out_m is not None else end_min)
+                                    - (in_m if in_m is not None else start_min) - brk)) / 60, 1)
+            payload["work_hours"] = hours     # without this the day kept its old (often 0) total
         if not att:
             payload.update({"employee_id": reg.get("employee_id"), "date": day, "status": "Present",
-                            "work_hours": hours or 8, "break_minutes": 45, "location": "Office"})
+                            "work_hours": hours or 8, "break_minutes": brk, "location": "Office"})
+        else:
+            # a day with corrected punches is no longer an absence; WFH / On Leave stay as HR set them
+            current = (att or {}).get("status")
+            if hours and (payload.get("clock_in") or payload.get("clock_out")):
+                if current not in ("Work From Home", "On Leave"):
+                    payload["status"] = "Present" if hours >= 4 else "Half Day"
+            elif current == "Absent":
+                # approving a correction with no times of its own still means "this day is fine"
+                payload["status"] = "Present"
+                if not money(att.get("work_hours")):
+                    payload["work_hours"] = round(max(0.0, (end_min - start_min - brk) / 60), 1)
         row = db_update("attendance", att["id"], payload) if att else db_insert("attendance", payload)
         db_update("attendance_regularizations", row_id, {
             "status": "Approved", "reviewer_id": acting_employee_id(), "reviewed_at": str(today()),
@@ -2663,17 +2729,46 @@ def enrich_payslip(p):
     return row
 
 
+def month_year_from_args():
+    """Read the ?month=&year= pair shared by the payroll routes.
+
+    A bare month ('8') and the ISO shape ('2026-08', '2026/08') that the attendance and
+    report filters accept are both honoured, and anything unparseable is a 400 with a
+    sentence instead of a 500 - `int('2026-08')` used to crash both payroll endpoints.
+    Returns (year, month), either of which is None when that part was not supplied.
+    """
+    year_raw = (request.args.get("year") or "").strip()
+    month = year = None
+    raw_month = (request.args.get("month") or "").strip()
+    bits = [b for b in re.split(r"[^0-9]+", raw_month) if b]
+    if raw_month and not bits:      # "september" is a mistake, not an absent filter
+        raise ApiError("month must be a number 1-12 or a period like 2026-08")
+    if bits:
+        try:
+            month = int(bits[-1])
+            if len(bits) > 1:
+                year = int(bits[-2])
+        except ValueError:
+            raise ApiError("month must be a number 1-12 or a period like 2026-08")
+        if not 1 <= month <= 12:
+            raise ApiError("month must be between 1 and 12")
+    if year_raw:
+        if not year_raw.isdigit():
+            raise ApiError("year must be a four digit number")
+        year = int(year_raw)
+    return year, month
+
+
 @app.route("/api/payslips")
 def api_payslips():
     employee_id = scoped_employee_id()
     filters = {} if not employee_id else {"employee_id": employee_id}
-    month = request.args.get("month")
-    year = request.args.get("year")
+    year, month = month_year_from_args()
     rows = db_list("payslips", filters or None, order="year", descending=True)
     if month:
-        rows = [r for r in rows if str(r.get("month")) == str(int(month))]
+        rows = [r for r in rows if int(r.get("month") or 0) == month]
     if year:
-        rows = [r for r in rows if str(r.get("year")) == str(year)]
+        rows = [r for r in rows if int(r.get("year") or 0) == year]
     return jsonify([enrich_payslip(r) for r in rows])
 
 
@@ -2716,11 +2811,12 @@ def api_payroll_summary():
     scope = scoped_employee_id()
     if scope:
         slips = [s for s in slips if str(s.get("employee_id")) == str(scope)]
-    if not request.args.get("month") and not request.args.get("year") and slips:
+    arg_year, arg_month = month_year_from_args()
+    if not arg_month and not arg_year and slips:
         year, month = max((int(s.get("year") or 0), int(s.get("month") or 0)) for s in slips)   # last processed period
     else:
-        year = int(request.args.get("year") or today().year)
-        month = int(request.args.get("month") or today().month)
+        year = arg_year or today().year
+        month = arg_month or today().month
     rows = [s for s in slips if int(s.get("year") or 0) == year and int(s.get("month") or 0) == month]
     structures = db_list("payroll_structures")
     by_employee = {str(s.get("employee_id")): s for s in structures}
