@@ -480,6 +480,55 @@ r, _ = call("POST", "/login", json_body={"email": "deepak.chauhan@company.com", 
             expect=(401,), label="exited employee cannot sign in")
 show("exited login says", (r.json().get("error") or "")[:44])
 
+print("== wall clock (the office, not the container) ==")
+from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+IST = _tz(_td(hours=5, minutes=30))
+_, hh = call("GET", "/api/health", want_keys=["timezone", "office_time", "wall_clock_offset_minutes"],
+             label="health exposes the office clock")
+show("server timezone", hh["timezone"])
+assert int(hh["wall_clock_offset_minutes"]) == 330, f"clock is {hh['wall_clock_offset_minutes']} min from UTC, expected 330 (IST)"
+expected = _dt.now(IST)
+
+
+def seconds_off(hhmmss, ref):
+    """How far a HH:MM[:SS] value is from a datetime, wrapping over midnight."""
+    parts = [int(x) for x in str(hhmmss)[:8].split(":") if x.isdigit()]
+    while len(parts) < 3:
+        parts.append(0)
+    a = parts[0] * 3600 + parts[1] * 60 + parts[2]
+    b = ref.hour * 3600 + ref.minute * 60 + ref.second
+    gap = abs(a - b)
+    return min(gap, 86400 - gap)
+
+
+drift = seconds_off(hh["office_time"], expected)
+show("office_time vs IST now", f"{hh['office_time']} vs {expected.strftime('%H:%M:%S')} ({int(drift)}s apart)")
+assert drift < 120, f"/api/health office_time is {int(drift)}s away from IST - the server is on its own clock"
+
+# a punch filed now has to land on today's IST time and date, whatever the host clock says
+_, before = call("GET", "/api/attendance", want_keys=["rows"], label="attendance before the punch")
+mine_row = next((a for a in before["rows"] if a.get("date") == expected.strftime("%Y-%m-%d")), None)
+_, clk = call("POST", "/api/attendance/clock", json_body={"action": "in", "location": "Testing"},
+              expect=(200, 400), label="clock in")
+if clk.get("success"):
+    hhmm = clk["time"]
+    diff = seconds_off(hhmm, expected)
+    show("clocked in at", f"{hhmm} (IST now {expected.strftime('%H:%M')})")
+    assert diff <= 120, f"clock-in stamped {hhmm} but the office clock says {expected.strftime('%H:%M')}"
+    _, aft = call("GET", "/api/attendance", want_keys=["rows"], label="attendance after the punch")
+    row = next((a for a in aft["rows"] if str(a.get("date"))[:10] == expected.strftime("%Y-%m-%d")), None)
+    assert row, "the punch was filed on a date other than the office's today"
+    show("punch stored under", f"{row['date']} {row.get('clock_in')}")
+    stored = seconds_off(str(row.get("clock_in")), expected)
+    show("stored clock_in", f"{row.get('clock_in')} ({int(stored)}s from IST now)")
+    assert stored <= 240, f"stored clock_in {row.get('clock_in')} is not office time ({int(stored)}s off)"
+_, tr = call("GET", "/api/stats", want_keys=["my_time"], label="tracker after the punch")
+show("tracker shows", f"{tr['my_time']['clock_in']} · {tr['my_time']['status']}")
+show("month the API defaulted to", before.get("month"))
+assert before.get("month") == expected.strftime("%Y-%m"), \
+    f"the attendance month defaulted to {before.get('month')}, not the office month {expected.strftime('%Y-%m')}"
+call("GET", "/api/payroll/summary", label="payroll summary still answers after the clock change")
+
 print("== misc ==")
 call("GET", "/api/health", label="health again")
 _, h = call("GET", "/api/health", label="health body")
