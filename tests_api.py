@@ -126,6 +126,11 @@ call("POST", "/api/orgchart/assign-manager", json_body={"employee_id": some["id"
      expect=(400, 404), label="bogus manager rejected")
 call("POST", "/api/orgchart/assign-manager", json_body={"employee_id": some["id"], "manager_id": root_id}, label="assign manager")
 
+def today_str(year_month, day):
+    """`2026-09` + 3 -> `2026-09-03` (the seeded month, so the window always has data)."""
+    return f"{year_month}-{day:02d}"
+
+
 print("== attendance ==")
 import datetime as dt
 month = dt.date.today().strftime("%Y-%m")
@@ -135,6 +140,25 @@ show("sample", att["rows"][0] if att["rows"] else None)
 _, summ = call("GET", f"/api/attendance/summary?month={month}&employee_id={me['employee']['id']}",
                want_keys=["present", "total_hours", "calendar", "avg_hours"], label="summary")
 show("summary", {k: summ[k] for k in ("days_marked", "present", "wfh", "absent", "late_days", "total_hours", "avg_hours", "overtime_hours")})
+# the month / from-to filters must answer a nonsense value, never 500 on it
+_, sep_att = call("GET", f"/api/attendance?month={month.replace('-', '/')}",
+                  want_keys=["rows", "from_date"], label="attendance accepts 2026/09 as well as 2026-09")
+if isinstance(sep_att, dict):
+    assert len(sep_att["rows"]) == len(att["rows"]), "slash and dash forms of the same period returned different rows"
+call("GET", "/api/attendance?month=nonsense", expect=(400,), label="month junk refused on the list")
+call("GET", "/api/attendance?month=2026-13", expect=(400,), label="month 13 refused on the list")
+call("GET", "/api/attendance/summary?month=nonsense", expect=(400,), label="month junk refused on the summary (was 500)")
+call("GET", "/api/attendance?from=nope", expect=(400,), label="from=junk refused instead of crashing")
+_, window = call("GET", f"/api/attendance?from={today_str(month, 1)}&to={today_str(month, 2)}",
+                 want_keys=["from_date", "to_date", "rows"], label="explicit from/to window")
+if isinstance(window, dict):
+    assert (window["from_date"], window["to_date"]) == (today_str(month, 1), today_str(month, 2)), "window was not echoed back"
+    assert all(window["from_date"] <= str(r["date"])[:10] <= window["to_date"] for r in window["rows"]), \
+               "rows fell outside the requested window"
+    show("from/to window", f"{window['from_date']}..{window['to_date']} -> {len(window['rows'])} of {len(att['rows'])} rows")
+_, flipped = call("GET", f"/api/attendance?from={today_str(month, 5)}&to={today_str(month, 1)}", label="reversed window is normalized")
+if isinstance(flipped, dict):
+    assert flipped["from_date"] <= flipped["to_date"], "a reversed from/to came back reversed"
 _, clock = call("POST", "/api/attendance/clock", json_body={"action": "out"}, expect=(200, 400), label="clock out")
 show("clock", clock)
 call("POST", "/api/attendance/clock", json_body={"action": "in"}, expect=(200, 400), label="clock in (may already be in)")
@@ -156,6 +180,71 @@ call("POST", f"/api/regularizations/{reg['regularization']['id']}/action", json_
 call("POST", f"/api/regularizations/{reg['regularization']['id']}/action",
      json_body={"action": "reject", "remark": "Please attach the release ticket."}, label="reject with remark")
 call("DELETE", f"/api/regularizations/{reg['regularization']['id']}", expect=(200, 400), label="withdraw (only pending)")
+
+print("== clock state machine and HR punch edits ==")
+call("POST", "/api/demo/reset", json_body={}, label="pristine store for the clock checks")
+_, dir_rows = call("GET", "/api/employees", label="directory for the clock checks")
+me_id = next(e["id"] for e in dir_rows if e["email"] == "aarav.sharma@company.com")
+today_s = str(dt.date.today())
+
+_, closed = call("POST", "/api/attendance/entry", json_body={"employee_id": me_id, "date": today_s, "status": "Present",
+                                                              "clock_in": "09:15", "clock_out": "18:45", "break_minutes": 45},
+                 want_keys=["attendance"], label="HR files a complete day")
+att = closed["attendance"]
+show("after the edit", f"{att['clock_in']} -> {att['clock_out']} = {att['work_hours']} h, late {att['is_late']}")
+assert att["clock_in"] == "09:15:00" and att["clock_out"] == "18:45:00", "times were not normalised to HH:MM:SS"
+assert abs(float(att["work_hours"]) - 8.8) < 0.1, f"work hours were not recomputed from the punches ({att['work_hours']})"
+assert att["is_late"] is False, "09:15 is inside the 09:30 start + 15 min grace, so it must not be late"
+_, after = call("GET", "/api/attendance", want_keys=["rows"], label="attendance after the edit")
+row1 = next(a for a in after["rows"] if a["id"] == att["id"])
+assert row1["clock_in_label"] == "09:15 AM", f"the table still shows {row1['clock_in_label']}"
+# a late correction has to flip the flag the other way too
+_, late_fix = call("POST", "/api/attendance/entry", json_body={"employee_id": me_id, "date": today_s, "status": "Present",
+                                                                "clock_in": "10:40", "clock_out": "18:45", "break_minutes": 45},
+                  want_keys=["attendance"], label="HR moves the clock-in late")
+assert late_fix["attendance"]["is_late"] is True, "10:40 against a 09:45 grace must be marked late"
+_, _ = call("POST", "/api/attendance/entry", json_body={"employee_id": me_id, "date": today_s, "status": "Present",
+                                                        "clock_in": "09:15", "clock_out": "18:45", "break_minutes": 45},
+           label="back to the on-time punch")
+r, j = call("POST", "/api/attendance/clock", json_body={"action": "in"}, expect=(400,), label="a second clock-in on a closed day is blocked")
+assert "already closed" in (j.get("error") or "").lower(), f"unexpected reply: {j}"
+r, j = call("POST", "/api/attendance/clock", json_body={"action": "out"}, expect=(400,), label="a second clock-out is blocked")
+assert "closed" in (j.get("error") or "").lower() or "already clocked out" in (j.get("error") or "").lower(), j
+# and the day is never left "in progress" behind: an open day refuses a second in, accepts the out
+call("POST", "/api/attendance/entry", json_body={"employee_id": me_id, "date": today_s, "status": "Present",
+                                                "clock_in": "08:30", "clock_out": None, "break_minutes": 45}, label="reopen the day")
+r, j = call("POST", "/api/attendance/clock", json_body={"action": "in"}, expect=(400,), label="clock-in while the day is open")
+assert "already clocked in" in (j.get("error") or "").lower(), j
+r, j = call("POST", "/api/attendance/clock", json_body={"action": "out"}, label="clock-out closes that open day")
+assert j.get("success") and float(j["hours"]) > 0, j
+# rows left over from the old behaviour (out before in) are reopened instead of jamming the person
+call("POST", "/api/attendance/entry", json_body={"employee_id": me_id, "date": today_s, "status": "Present",
+                                                "clock_in": "18:00", "clock_out": "09:00", "break_minutes": 45}, label="plant a broken row")
+r, j = call("POST", "/api/attendance/clock", json_body={"action": "in"}, want_keys=["message"], label="a broken row is reopened by a clock-in")
+assert "reopened" in (j.get("message") or "").lower(), j
+r, j = call("POST", "/api/attendance/clock", json_body={"action": "out"}, label="and can then be closed normally")
+_, st = call("GET", "/api/stats", want_keys=["my_time"], label="tracker state after closing")
+t = st["my_time"]
+show("tracker after close", f"{t['clock_in']} -> {t['clock_out']} · {t['status']}")
+assert t["clocked_out"] is True and t["clocked_in"] is False, "a closed day must not read as clocked-in"
+# approving a regularization must refresh the totals too, not just the status pill
+_, regs = call("GET", "/api/regularizations", label="regularization queue")
+pend = next((x for x in (regs if isinstance(regs, list) else regs.get("rows", [])) if x.get("status") == "Pending"), None)
+if pend:
+    day = str(pend["date"])[:10]
+    call("POST", "/api/attendance/entry", json_body={"employee_id": pend["employee_id"], "date": day, "status": "Absent",
+                                                     "clock_in": None, "clock_out": None, "break_minutes": 0,
+                                                     "note": "no punch at all, awaiting the correction"},
+         label="blank the day before approving")
+    r, j = call("POST", f"/api/regularizations/{pend['id']}/action", json_body={"action": "approve", "remark": "approved"},
+                want_keys=["attendance", "message"], label="approve the correction")
+    fixed = j["attendance"]
+    show("approved row", f"{fixed.get('clock_in')} -> {fixed.get('clock_out')} = {fixed.get('work_hours')} h · {fixed.get('regularization_status')}")
+    assert fixed.get("regularization_status") == "Approved", fixed
+    assert float(fixed.get("work_hours") or 0) > 0, "approval left the day with no hours - totals were not recomputed"
+    assert fixed.get("status") != "Absent", "approval kept the absent mark on a corrected day"
+
+call("POST", "/api/demo/reset", json_body={}, label="store restored")
 
 print("== leave ==")
 call("GET", "/api/leave-types", label="leave types")
@@ -289,6 +378,21 @@ _, pay = call("GET", "/api/payroll/summary", label="payroll summary body")
 show("payroll", {k: pay[k] for k in ("period", "employees_paid", "net_payroll", "gross_payroll", "deductions", "monthly_ctc_cost")})
 show("trend", [t for t in pay["trend"] if t["count"]][:3])
 call("GET", "/api/payroll/structures", label="structures")
+# the month filter has to accept the ISO shape the attendance/report filters use: int("2026-08")
+# used to raise ValueError and put both payroll endpoints on 500
+_, iso_slips = call("GET", "/api/payslips?month=2026-08", label="payslips filtered by ISO month")
+_, num_slips = call("GET", "/api/payslips?month=8&year=2026", label="payslips filtered by month+year")
+if isinstance(iso_slips, list) and isinstance(num_slips, list):
+    assert len(iso_slips) == len(num_slips), f"month=2026-08 gave {len(iso_slips)} slips, month=8&year=2026 gave {len(num_slips)}"
+    assert all(str(x.get("month")) in ("8", "08") for x in iso_slips), "ISO month filter returned a slip from another month"
+    show("payslips by month", f"2026-08 and 8/2026 agree - {len(iso_slips)} slip(s)")
+_, iso_sum = call("GET", "/api/payroll/summary?month=2026-08",
+                  want_keys=["period", "year", "month", "trend"], label="payroll summary filtered by ISO month")
+if isinstance(iso_sum, dict):
+    assert (iso_sum.get("year"), iso_sum.get("month")) == (2026, 8), f"summary resolved {iso_sum.get('year')}-{iso_sum.get('month')}"
+    show("payroll period", f"{iso_sum['period']} from month=2026-08, net {iso_sum['net_payroll']} for {iso_sum['employees_paid']} employee(s)")
+call("GET", "/api/payslips?month=13", expect=(400,), label="month out of range refused")
+call("GET", "/api/payroll/summary?month=nonsense", expect=(400,), label="month junk answered with 400, not 500")
 call("GET", "/api/reimbursements", want_keys=["0.amount_label"], label="reimbursements")
 call("GET", "/api/reimbursements/summary", label="expense summary")
 call("POST", "/api/reimbursements", json_body={"amount": 0, "date": str(dt.date.today()), "description": "x"}, expect=(400,), label="amount validation")
