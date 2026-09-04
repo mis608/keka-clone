@@ -25,6 +25,10 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 load_dotenv()
 
+# One wall clock for the whole app. app.py and mock_data.py both read it, because the host this runs
+# on is not the office: see clock.py.
+from clock import TZ_LABEL as APP_TZ_LABEL, now_local, offset_minutes, today
+
 APP_DIR = os.path.abspath(os.path.dirname(__file__))
 UPLOAD_DIR = os.path.join(APP_DIR, "uploads")
 MOCK_STORE_PATH = os.path.join(APP_DIR, "data", "mock_store.json")
@@ -73,6 +77,7 @@ if supabase is None:
 ADMIN_EMAILS = {e.strip().lower() for e in os.getenv("ADMIN_EMAILS", "admin@company.com").split(",") if e.strip()}
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "demo123")
 EMPLOYEE_PASSWORD = os.getenv("EMPLOYEE_PASSWORD", "demo123")
+
 # The demo HR Admin login has no employee row of its own, so "self" actions fall back to this person.
 DEFAULT_EMPLOYEE_EMAIL = os.getenv("DEFAULT_EMPLOYEE_EMAIL", "aarav.sharma@company.com")
 if not os.getenv("ADMIN_EMAILS") or ADMIN_PASSWORD == "demo123":
@@ -198,7 +203,7 @@ def _save_mock():
         os.makedirs(os.path.dirname(MOCK_STORE_PATH), exist_ok=True)
         blob = dict(mock_db)
         blob["_version"] = MOCK_VERSION
-        blob["_saved_at"] = datetime.now().isoformat()
+        blob["_saved_at"] = now_local().isoformat()
         tmp = MOCK_STORE_PATH + ".tmp"
         with open(tmp, "w", encoding="utf-8") as fh:
             json.dump(blob, fh, default=str)
@@ -316,7 +321,7 @@ def db_insert(table, payload):
             raise ApiError(_friendly_db_error(exc), 400) from exc
     row = dict(payload)
     row["id"] = row.get("id") or uuid.uuid4().hex[:10]
-    row.setdefault("created_at", str(date.today()))
+    row.setdefault("created_at", str(today()))
     _load_mock().setdefault(table, []).append(row)
     _save_mock()
     return dict(row)
@@ -391,10 +396,6 @@ def fmt_day(value, fmt="%d %b %Y"):
         return "-"
     out = d.strftime(fmt)
     return out.replace(" 0", " ") if "%d" in fmt else out
-
-
-def today():
-    return date.today()
 
 
 def fmt_time(value, fallback="-"):
@@ -810,10 +811,13 @@ def api_login_hint():
 
 @app.route("/api/health")
 def health():
-    return jsonify({"status": "ok", "supabase_connected": supabase is not None, "mock_mode": supabase is None,
+    return jsonify({"status": "ok", "timezone": APP_TZ_LABEL,
+                    "office_time": now_local().strftime("%H:%M:%S"),
+                    "wall_clock_offset_minutes": offset_minutes(),
+                    "supabase_connected": supabase is not None, "mock_mode": supabase is None,
                     "supabase_key_source": supabase_key_source, "supabase_error": supabase_error,
                     "storage": (f"supabase:{SUPABASE_BUCKET}" if (supabase and SUPABASE_BUCKET) else "local:uploads"),
-                    "timestamp": datetime.now().isoformat()})
+                    "timestamp": now_local().isoformat()})
 
 
 # =================================================================== csv helper
@@ -832,7 +836,7 @@ def csv_response(name, columns, rows):
     for r in rows:
         writer.writerow([json_scalar(r.get(c)) for c in columns])
     return Response(buf.getvalue(), mimetype="text/csv",
-                    headers={"Content-Disposition": f"attachment; filename={name}_{date.today().isoformat()}.csv"})
+                    headers={"Content-Disposition": f"attachment; filename={name}_{today().isoformat()}.csv"})
 
 
 # =================================================================== home / stats
@@ -991,7 +995,8 @@ def api_stats():
             worked = round(max(0.0, (my_co - my_ci - brk) / 60), 2)
         else:
             # live elapsed time; demo rows carry an "as of" total for when the wall clock is behind them
-            now_min = max(datetime.now().hour * 60 + datetime.now().minute, my_ci)
+            local = now_local()
+            now_min = max(local.hour * 60 + local.minute, my_ci)
             worked = round(max((now_min - my_ci - brk) / 60, money((mine or {}).get("work_hours"))), 2)
     shift_hours = max(0.0, (end_min - start_min) / 60 - brk / 60)
     my_time = {
@@ -1626,7 +1631,7 @@ def api_documents_meta():
 def store_bytes(file_storage, employee_id, doc_type, notes):
     """Persist an upload. Supabase Storage when a bucket is configured, else the local uploads folder."""
     safe = re.sub(r"[^A-Za-z0-9._-]", "_", file_storage.filename or "document")
-    name = f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{safe}"
+    name = f"{now_local().strftime('%Y%m%d%H%M%S')}_{safe}"
     rel = f"documents/{employee_id or 'shared'}/{name}"
     raw = file_storage.read()
     if supabase and SUPABASE_BUCKET:
@@ -1843,7 +1848,7 @@ def enrich_attendance_row(a, employees=None):
 @app.route("/api/attendance")
 def api_attendance():
     emp_id = scoped_employee_id()
-    month = request.args.get("month") or date.today().strftime("%Y-%m")
+    month = request.args.get("month") or today().strftime("%Y-%m")
     try:
         first, last = month_first(month), month_last(month)
     except (ValueError, AttributeError):
@@ -1865,7 +1870,7 @@ def api_attendance():
 @app.route("/api/attendance/summary")
 def api_attendance_summary():
     emp_id = request.args.get("employee_id") or (None if is_admin() else acting_employee_id())
-    month = request.args.get("month") or date.today().strftime("%Y-%m")
+    month = request.args.get("month") or today().strftime("%Y-%m")
     first, last = month_first(month), month_last(month)
     filters = {"date": (">=", str(first))}
     if emp_id:
@@ -1909,7 +1914,7 @@ def api_attendance_clock():
         employee_id = acting_employee_id()
     if not employee_id:
         raise ApiError("No employee profile is linked to this account, so there is nothing to clock")
-    now = datetime.now()
+    now = now_local()
     today_s = str(now.date())
     shift = shift_row()
     grace = int(shift.get("grace_minutes") or 15)
@@ -3517,7 +3522,7 @@ def api_report(name):
         raise ApiError(f"No such report '{name}'. Available: {', '.join(sorted(builders))}")
     payload = builder(frm, to, department)
     payload["meta"] = {"report": name, "from": str(frm), "to": str(to), "department": department or "All departments",
-                       "generated_at": datetime.now().strftime("%d %b %Y, %H:%M"), "generated_by": session["user"]["name"],
+                       "generated_at": now_local().strftime("%d %b %Y, %H:%M"), "generated_by": session["user"]["name"],
                        "rows": len(payload.get("table", {}).get("rows", []))}
     if request.args.get("format") == "csv":
         table = payload.get("table") or {}
