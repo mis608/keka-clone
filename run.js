@@ -476,6 +476,59 @@ async function main() {
   const exportButtons = [...doc.querySelectorAll('button, a')].filter(b => /export|csv/i.test(b.textContent));
   ok('exports', `${exportButtons.length} export control(s) present`);
 
+  // ---------------- HR punch edit and the two document modals (regression: a grid()/join typo
+  // silently killed all three: clicking did nothing at all, so this checks each one really opens)
+  window.eval("switchModule('attendance')"); await settle();
+  const maEditBtn = doc.querySelector('#attendanceTable [title="Edit record"]');
+  if (!maEditBtn) fail('attendance edit', 'HR has no row-level "Edit record" button');
+  else {
+    maEditBtn.dispatchEvent(new window.MouseEvent('click', { bubbles: true })); await wait(700);
+    const maEmp = doc.querySelector('#ma_emp'), brk = doc.querySelector('#ma_break');
+    const maVisible = !doc.querySelector('#modalBackdrop').classList.contains('hidden');
+    if (!maEmp || !brk || !maVisible) fail('attendance edit', 'the modal never opened (fields missing)');
+    else {
+      ok('attendance edit', `modal opened: employee ${JSON.stringify(maEmp.value)}, ${doc.querySelectorAll('#modalBody input, #modalBody select').length} fields`);
+      const beforeTxt = (doc.querySelector('#attendanceTable tbody tr') || {}).textContent || '';
+      doc.querySelector('#ma_in').value = '09:15';
+      doc.querySelector('#ma_out').value = '18:45';
+      const maSave = [...doc.querySelectorAll('#modalFoot button')].find(b => /save changes|mark day/i.test(b.textContent));
+      if (!maSave) fail('attendance edit', 'no Save button in the modal footer');
+      else {
+        maSave.dispatchEvent(new window.MouseEvent('click', { bubbles: true })); await wait(1600);
+        const afterTxt = (doc.querySelector('#attendanceTable tbody tr') || {}).textContent || '';
+        const stRes = await api('/api/attendance?month=' + new Date().toISOString().slice(0, 7));
+        const edited = (stRes.body.rows || []).find(r => String(r.clock_in).startsWith('09:15'));
+        if (!edited) fail('attendance edit', 'the saved times did not come back from the API');
+        else if (edited.clock_in !== '09:15:00' || edited.clock_out !== '18:45:00') fail('attendance edit', `stored as ${edited.clock_in}/${edited.clock_out}, expected HH:MM:SS`);
+        else if (!(Number(edited.work_hours) > 8)) fail('attendance edit', `work hours were not recomputed (${edited.work_hours})`);
+        else ok('attendance edit', `09:15 -> 18:45 persisted as ${edited.clock_in}/${edited.clock_out} = ${edited.work_hours} h${beforeTxt === afterTxt ? '' : ', table re-rendered'}`);
+        if (doc.querySelector('#modalBackdrop').classList.contains('hidden')) ok('attendance edit', 'modal closed after saving');
+        else fail('attendance edit', 'the modal stayed open after saving');
+      }
+    }
+    window.eval('closeAllModals()');
+  }
+  for (const [fn, sel, name] of [['openDocUpload()', '#doc_type', 'Upload document'], ['openDocRequestForm()', '#dr_emp', 'Request a document']]) {
+    window.eval(fn); await wait(450);
+    if (!doc.querySelector(sel) || doc.querySelector('#modalBackdrop').classList.contains('hidden')) fail('modals', `${name} never opened`);
+    else ok('modals', `${name} opens with ${doc.querySelectorAll('#modalBody input, #modalBody select, #modalBody textarea').length} controls`);
+    window.eval('closeAllModals()');
+  }
+
+  // the tracker must match the day's real state - a closed day cannot invite another clock-in
+  window.eval("switchModule('home')"); await settle();
+  const trk = (await api('/api/stats')).body.my_time;
+  const clkIn = doc.querySelector('#btnClockIn'), outB = doc.querySelector('#btnClockOut');
+  const wantIn = trk.clocked_out ? 'Day closed' : trk.clocked_in ? 'Clocked in' : 'Clock in';
+  const locked = wantIn !== 'Clock in';
+  if (clkIn.textContent.trim() !== wantIn) fail('tracker', `clock-in button says '${clkIn.textContent.trim()}' while the API says ${JSON.stringify({ in: trk.clocked_in, out: trk.clocked_out })}`);
+  else if (!!clkIn.disabled !== locked) fail('tracker', `'${wantIn}' should be ${locked ? 'locked' : 'clickable'} (disabled=${clkIn.disabled})`);
+  else if (trk.clocked_out && !outB.disabled) fail('tracker', 'clock-out is still active on a closed day');
+  else ok('tracker', `buttons match the day: '${clkIn.textContent.trim()}' / '${outB.textContent.trim()}'`);
+  const trkTxt = (doc.querySelector('#clockStatusText') || {}).textContent || '';
+  if (trk.clocked_out && !(trkTxt.includes(trk.clock_in) && trkTxt.includes(trk.clock_out))) fail('tracker', `a closed day hides its punches: "${trkTxt.trim()}"`);
+  else ok('tracker', trk.clocked_out ? `the status line shows the punches: ${trkTxt.trim().slice(0, 74)}…` : `day still open, status line: ${trkTxt.trim().slice(0, 60)}…`);
+
   // ------------------------------------------------------- employee role must see less
   // The admin DOM is the baseline: all three HR areas are in the sidebar there.
   for (const mod of ['employees', 'hiring', 'reports']) {
@@ -593,10 +646,10 @@ async function main() {
   console.log('\n' + notes.join('\n'));
   console.log('\n' + '='.repeat(76));
   if (problems.length) {
-    console.log(`${problems.length} PROBLEM(S):`);
+    console.log(`${problems.length} PROBLEM(S) across ${notes.length + problems.length} recorded assertions:`);
     [...new Set(problems)].forEach(p => console.log('  x ' + p));
   } else {
-    console.log(`DOM harness passed: ${MODULES.length} modules, ${reportNames.length} reports, modals, flows and role gating.`);
+    console.log(`DOM harness passed: ${MODULES.length} modules, ${reportNames.length} reports, modals, flows and role gating - ${notes.length + problems.length} recorded assertions.`);
   }
   dom.window.close();
   process.exit(problems.length ? 1 : 0);
