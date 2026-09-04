@@ -441,7 +441,11 @@ function renderTracker(t) {
   ].join('');
   let msg, icon = 'fa-clock';
   if (t.clocked_in) { msg = `Clocked in at <b>${esc(t.clock_in)}</b> · ${t.status.toLowerCase()}`; icon = 'fa-circle-notch'; }
-  else if (t.clocked_out) { msg = `Day closed · <b>${(t.worked_hours || 0).toFixed(1)}h</b> worked, ${t.overtime_hours > 0 ? t.overtime_hours + 'h overtime' : (t.shortfall_minutes > 0 ? Math.round(t.shortfall_minutes) + ' min short' : 'shift complete')}`; icon = 'fa-check'; }
+  else if (t.clocked_out) {   // an earlier copy of this branch shadowed it, so the punches were never shown
+    const tail = t.overtime_hours > 0 ? `${t.overtime_hours}h overtime` : (t.shortfall_minutes > 0 ? `${Math.round(t.shortfall_minutes)} min short` : 'shift complete');
+    msg = `Day closed · <b>${(t.worked_hours || 0).toFixed(1)}h</b> worked, in <b>${esc(t.clock_in)}</b> out <b>${esc(t.clock_out)}</b> · ${tail}. A wrong punch is fixed by HR or a regularization.`;
+    icon = 'fa-lock';
+  }
   else { msg = 'Not clocked in yet today'; icon = 'fa-hourglass-half'; }
   // one write per element: an earlier version replaced #clockStatus's children here, which
   // deleted #clockStatusText and made the next renderTracker() call throw on a null lookup
@@ -451,13 +455,15 @@ function renderTracker(t) {
       `<span id="clockStatusText" class="text-[13px] text-white/70"><i class="fas ${icon} mr-1 text-white/40"></i>${msg}</span>`;
   }
   const inBtn = $('#btnClockIn'), outBtn = $('#btnClockOut');
+  const open = !!t.clocked_in, closed = !!t.clocked_out;      // one punch pair a day: closed is closed
   if (inBtn) {
-    inBtn.disabled = !!t.clocked_in;
-    inBtn.className = `btn justify-center ${t.clocked_in ? 'bg-white/10 text-white/40 cursor-not-allowed' : '!bg-white !text-[#1e1f2b] hover:bg-white/90'}`;
-    inBtn.textContent = t.clocked_in ? 'Clocked in' : 'Clock in';
+    inBtn.disabled = open || closed;
+    inBtn.className = `btn justify-center ${(open || closed) ? 'bg-white/10 text-white/40 cursor-not-allowed' : '!bg-white !text-[#1e1f2b] hover:bg-white/90'}`;
+    inBtn.textContent = closed ? 'Day closed' : open ? 'Clocked in' : 'Clock in';
+    inBtn.title = closed ? 'Today is already closed - ask HR to edit the record or file a regularization' : '';
   }
   if (outBtn) {
-    outBtn.disabled = !t.clocked_in;
+    outBtn.disabled = !open;
     outBtn.className = `btn justify-center ${t.clocked_in ? '!bg-[#ff5a5a] text-white hover:brightness-95' : 'bg-white/10 text-white/40 cursor-not-allowed'}`;
     outBtn.textContent = t.clocked_out ? 'Clocked out' : 'Clock out';
   }
@@ -1201,7 +1207,7 @@ function openDocUpload(presetDocType, presetEmployee) {
   const body = `<div class="space-y-3.5">
     ${grid('md:grid-cols-2 gap-3', [
       isAdmin() ? fieldRow('File it for', 'doc_employee', presetEmployee || APP.user.employee_id || '', { type: 'select', options: employeeOptions('Select employee'), placeholder: 'Select employee' }) : `<div><div class="lbl">File it for</div><div class="field flex items-center gap-2 bg-[#f6f7fb]">${avatar(APP.me?.employee || APP.user.employee_id || '')}<div><div class="text-[13px] font-medium">${esc(APP.me?.employee?.full_name || APP.user.name)}</div><div class="text-[11px] text-[#8b8fa3]">Documents you upload are always filed under your own record</div></div></div></div>`,
-      fieldRow('Document type', 'doc_type', presetDocType || '', { type: 'select', options: types.map(t => ({ value: t.type, label: `${t.type}${t.mandatory ? ' (mandatory)' : ''}` })), placeholder: 'Select type', onchange: 'docTypeChanged()' })]).join('')}
+      fieldRow('Document type', 'doc_type', presetDocType || '', { type: 'select', options: types.map(t => ({ value: t.type, label: `${t.type}${t.mandatory ? ' (mandatory)' : ''}` })), placeholder: 'Select type', onchange: 'docTypeChanged()' })].join(''))}
     <div id="docPurposeHint" class="text-[12px] text-[#584ac0] bg-[#eef0ff] rounded-xl p-3 hidden"></div>
     ${fieldRow('Title', 'doc_title', '', { placeholder: 'e.g. Aadhaar front and back, Apr 2026' })}
     ${fieldRow('Why is this on file? / what it is for', 'doc_purpose', '', { placeholder: 'Selected automatically from the type — edit if it needs a specific note', rows: 2, type: 'textarea' })}
@@ -1289,7 +1295,7 @@ function openDocRequestForm() {
     fieldRow('Ask which employee', 'dr_emp', '', { type: 'select', options: employeeOptions(false), placeholder: 'Select employee', required: true }),
     fieldRow('Document needed', 'dr_type', '', { type: 'select', options: types.map(t => ({ value: t.type, label: t.type })), placeholder: 'Select document', required: true }),
     fieldRow('Due date', 'dr_due', isoDay(new Date(Date.now() + 7 * 864e5)), { type: 'date' }),
-    fieldRow('Why do you need it?', 'dr_reason', '', { type: 'textarea', required: true, rows: 3, placeholder: 'Mandatory for the onboarding audit — we have no PAN on file.' })]).join('');
+    fieldRow('Why do you need it?', 'dr_reason', '', { type: 'textarea', required: true, rows: 3, placeholder: 'Mandatory for the onboarding audit — we have no PAN on file.' })].join(''));
   openModal('Request a document', `<div class="space-y-3">${body}</div>`, modalFootSave('submitDocRequest()', 'Send request'));
 }
 async function submitDocRequest() {
@@ -1491,20 +1497,39 @@ async function submitRegReject(id) {
 }
 async function withdrawReg(id) { await confirmAction('Withdraw this correction request?', async () => { const r = await api('/api/regularizations/' + id, { method: 'DELETE' }); toast(r.message, 'success'); loadAttendance(true); }, 'Withdraw'); }
 function openManualAttendance(empId, day) {
-  const rec = (attRowsCache || []).find(r => String(r.date) === String(day));
+  const rec = (attRowsCache || []).find(r => String(r.date) === String(day) && (!empId || String(r.employee_id) === String(empId)))
+    || (attRowsCache || []).find(r => String(r.date) === String(day));
+  // remembered so Save still works if the select ends up without a matching option (exited employee)
+  APP.maCtx = { employee_id: empId || (rec && rec.employee_id) || '', date: day || todayIso() };
+  const opts = employeeOptions(false).slice();
+  if (APP.maCtx.employee_id && !opts.some(o => String(o.value) === String(APP.maCtx.employee_id))) {
+    opts.push({ value: APP.maCtx.employee_id, label: `${(rec && rec.employee_name) || 'Employee'} · not in the active list` });
+  }
   const body = grid('md:grid-cols-2 gap-3', [
-    fieldRow('Employee', 'ma_emp', empId, { type: 'select', options: employeeOptions(false), placeholder: 'Select', required: true }),
+    fieldRow('Employee', 'ma_emp', APP.maCtx.employee_id, { type: 'select', options: opts, placeholder: 'Select', required: true }),
     fieldRow('Date', 'ma_date', day || todayIso(), { type: 'date', required: true }),
     fieldRow('Clock in', 'ma_in', rec?.clock_in ? String(rec.clock_in).slice(0, 5) : '', { type: 'time' }),
     fieldRow('Clock out', 'ma_out', rec?.clock_out ? String(rec.clock_out).slice(0, 5) : '', { type: 'time' }),
     fieldRow('Status', 'ma_status', rec?.status || 'Present', { type: 'select', options: ['Present', 'Work From Home', 'Half Day', 'On Leave', 'Absent'] }),
-    fieldRow('Work hours', 'ma_hours', rec?.work_hours || '', { type: 'number', step: 0.5, placeholder: 'auto from in/out' }),
+    fieldRow('Work hours', 'ma_hours', '', { type: 'number', step: 0.5, placeholder: rec?.work_hours ? `${rec.work_hours} h on file - blank recomputes from the two times` : 'auto from in/out' }),
+    fieldRow('Break (min)', 'ma_break', rec?.break_minutes ?? 45, { type: 'number', step: 15, placeholder: '45' }),
     fieldRow('Location', 'ma_loc', rec?.location || 'Office'),
-    fieldRow('Note', 'ma_note', rec?.note || '', { placeholder: 'Marked by HR for the field visit' })]).join('');
-  openModal(day ? `Edit ${fmtDate(day)}` : 'Mark attendance', `<div class="space-y-3">${body}</div>`, modalFootSave('submitManualAttendance()', day ? 'Save changes' : 'Mark day'));
+    fieldRow('Note', 'ma_note', rec?.note || '', { placeholder: 'Marked by HR for the field visit' })].join(''));
+  openModal(day ? `Edit ${fmtDate(day)}` : 'Mark attendance', `<div class="space-y-3">${body}
+    <div class="text-[11.5px] text-[#8b8fa3] bg-[#f6f7fb] rounded-xl p-3">Leaving <b>work hours</b> blank recomputes it as clock out − clock in − break, and the late mark follows the shift start with its grace. Fill the number in only if you want to force a total.</div></div>`, modalFootSave('submitManualAttendance()', day ? 'Save changes' : 'Mark day'));
 }
 async function submitManualAttendance() {
-  const body = { employee_id: needValue('ma_emp', 'Select an employee'), date: needValue('ma_date', 'Pick a date'), status: $('#ma_status').value, clock_in: $('#ma_in').value || null, clock_out: $('#ma_out').value || null, work_hours: $('#ma_hours').value ? num($('#ma_hours').value) : 0, break_minutes: 45, location: $('#ma_loc').value || null, note: $('#ma_note').value || null, via_regularization: false };
+  const val = id => ((document.getElementById(id) || {}).value || '').trim();
+  const ctx = APP.maCtx || {};
+  const employee_id = val('ma_emp') || ctx.employee_id;
+  const date = val('ma_date') || ctx.date;
+  const ci = val('ma_in'), co = val('ma_out');
+  if (!employee_id) { toast('Choose whose day this is', 'error'); return; }
+  if (!date) { toast('Pick the date you are correcting', 'error'); return; }
+  if (ci && co && co <= ci) { toast('Clock out is not after clock in - check the two times', 'error'); return; }
+  const body = { employee_id, date, status: val('ma_status') || 'Present', clock_in: ci || null, clock_out: co || null,
+                 work_hours: val('ma_hours') ? num(val('ma_hours')) : 0, break_minutes: val('ma_break') ? num(val('ma_break')) : 0,
+                 location: val('ma_loc') || null, note: val('ma_note') || null, via_regularization: false };
   try { const r = await api('/api/attendance/entry', { method: 'POST', body }); toast(r.message, 'success'); closeAllModals(); loadAttendance(true); loadDashboard(true); } catch (e) { }
 }
 
