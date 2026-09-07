@@ -528,6 +528,53 @@ call("DELETE", f"/api/jobs/{jid}", label="delete now-empty job")
 call("DELETE", f"/api/employees/{hired['employee']['id']}", label="remove test hire")
 
 print("== performance ==")
+# ---- source-level invariants: every column the code asks the database for must exist in it.
+# `db_list("feedbacks", order="date")` was the bug this catches - demo data happened to carry a
+# `date` key so the sort silently did nothing, while Postgres refused the query outright.
+import importlib as _importlib
+import re as _re
+_app = _importlib.import_module("app")          # already imported by the envelope check; idempotent
+_src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "app.py"), encoding="utf-8").read()
+_meta = {"id", "created_at", "updated_at"}
+_bad_cols = []
+for _m in _re.finditer(r'db_(?:list|get)\(\s*"([a-z_0-9]+)"([^)]*)\)', _src, _re.S):
+    _cols = set(_app.SUPA_COLUMNS.get(_m.group(1), set())) | _meta
+    for _om in _re.finditer(r'order="([a-z_0-9]+)"', _m.group(2)):
+        if _om.group(1) not in _cols:
+            _bad_cols.append(f"{_m.group(1)}.order {_om.group(1)}")
+    for _fk in _re.finditer(r'"([a-z_0-9]+)":\s*(?:"|data|None|\()', _m.group(2)):
+        if _fk.group(1) not in _cols:
+            _bad_cols.append(f"{_m.group(1)}.filter {_fk.group(1)}")
+# and every *_FIELDS allowlist (the keys a POST/PUT may write) must be a real column of its table.
+# The mapping is deliberate: a new *_FIELDS constant makes this fail until someone says which table
+# it belongs to, which is exactly the review step that let `feedbacks.date` slip through.
+import ast as _ast
+_TABLE_OF_FIELDS = {"EMPLOYEE_FIELDS": ["employees"], "SELF_EDITABLE_FIELDS": ["employees"],
+                    "CANDIDATE_FIELDS": ["candidates"], "DEPARTMENT_FIELDS": ["departments"],
+                    "DOC_FIELDS": ["documents"], "DOC_REQUEST_FIELDS": ["document_requests"],
+                    "GOAL_FIELDS": ["goals"], "HIRE_FIELDS": ["employees"],   # the hire flow writes an employee row
+                    "JOB_FIELDS": ["jobs"], "REG_FIELDS": ["attendance_regularizations"],
+                    "REVIEW_FIELDS": ["performance_reviews"]}
+for _node in _ast.parse(_src).body:
+    if not (isinstance(_node, _ast.Assign) and isinstance(_node.targets[0], _ast.Name)
+            and "FIELDS" in _node.targets[0].id):
+        continue
+    _cname = _node.targets[0].id
+    _names = {e.value for e in getattr(_node.value, "elts", []) if isinstance(e, _ast.Constant)}
+    if _cname not in _TABLE_OF_FIELDS:
+        _bad_cols.append(f"{_cname} has no entry in the field-set map in tests_api.py")
+        continue
+    _allowed = set()
+    for _t in _TABLE_OF_FIELDS[_cname]:
+        _allowed |= set(_app.SUPA_COLUMNS.get(_t, set())) | _meta
+    for _field in sorted(_names - _allowed):
+        _bad_cols.append(f"{_cname} would write {_field}, which is not a column of {', '.join(_TABLE_OF_FIELDS[_cname])}")
+if _bad_cols:
+    fails.append("code asks for columns the schema does not have: " + "; ".join(sorted(set(_bad_cols))))
+    print("  !! FAIL column invariants -> " + "; ".join(sorted(set(_bad_cols))[:4]))
+else:
+    print("  ok   column invariants: every order/filter/allowlisted write field exists in the schema")
+
 # ---- the Supabase read path, against a fake client whose schema is one version behind.
 # Reads use select("*") so a missing column is invisible - but ORDER BY a column the database does
 # not have is a hard PostgREST error, which is what took the Performance tab down. db_list() now
@@ -538,10 +585,18 @@ class _FakeResult:
 
 
 class _FakeTable:
-    def __init__(self, name, cols, rows):
-        self.name, self.cols, self.rows, self.ordered_by = name, set(cols), rows, None
+    def __init__(self, name, cols, rows, order_only_bad=()):
+        self.name, self.cols, self.rows = name, set(cols), rows
+        self.order_only_bad = set(order_only_bad)
+        self.ordered_by, self.selects, self.orders = None, 0, 0
 
-    def select(self, _cols):
+    def select(self, cols):
+        # PostgREST validates the select list even when the table has no rows to return
+        self.selects += 1
+        for one in str(cols).split(","):
+            one = one.strip()
+            if one and one != "*" and one not in self.cols:
+                raise RuntimeError(f"column {self.name}.{one} does not exist")
         return self
 
     def limit(self, _n):
@@ -555,7 +610,8 @@ class _FakeTable:
     def in_(self, *_a): return self
 
     def order(self, col, desc=False):
-        if col not in self.cols:
+        self.orders += 1
+        if col not in self.cols or col in self.order_only_bad:
             raise RuntimeError(f"column {self.name}.{col} does not exist")
         self.ordered_by = col
         return self
@@ -567,20 +623,25 @@ class _FakeTable:
 class _FakeSupabase:
     """Rows come back carrying only the columns this older database actually has."""
 
-    def __init__(self, drop):
-        self.drop, self.tables = drop, {}
+    def __init__(self, drop, empty=(), order_only_bad=None):
+        self.drop, self.empty = drop, set(empty)
+        self.order_only_bad = order_only_bad or {}
+        self.tables = {}
 
     def table(self, name):
         if name not in self.tables:
-            store = _app._load_mock().get(name, [])
+            store = [] if name in self.empty else _app._load_mock().get(name, [])
             cols = [c for c in sorted(set(_app.SUPA_COLUMNS.get(name, set())) | {"id"})
                     if c not in self.drop.get(name, ())]
-            self.tables[name] = _FakeTable(name, cols, store)
+            self.tables[name] = _FakeTable(name, cols, store, self.order_only_bad.get(name, ()))
         return self.tables[name]
 
 
 checks[0] += 1
-_fake = _FakeSupabase({"performance_reviews": {"cycle_start"}, "goals": set()})
+_fake = _FakeSupabase({"performance_reviews": {"cycle_start"}, "goals": set(),
+                       # the reported failure: two brand-new, still-empty tables with no `date`
+                       "feedbacks": {"date"}, "checkins": set()},
+                      empty={"feedbacks", "checkins"}, order_only_bad={"checkins": {"date"}})
 _saved_supa, _app.supabase = _app.supabase, _fake
 _app._COLUMN_CACHE.clear()
 try:
@@ -596,6 +657,25 @@ try:
     assert [r["id"] for r in _app._sort_rows(_probe, "not_a_column", False)] == [1, 2, 3], \
         "sorting by an absent key must leave the order alone, not crash"
     print(f"  ok   a stale schema degrades instead of failing: {len(_rows)} review(s) back, SQL order skipped")
+    # empty tables: sample_columns has nothing to read, so the column probe and the retry are the only
+    # things standing between "no rows yet" and a 502 on the whole Performance tab
+    _empty_ok = _app.db_list("feedbacks", order="date", descending=True)
+    assert _empty_ok == [], f"an empty table with a missing order column should read as empty, got {_empty_ok}"
+    assert _fake.tables["feedbacks"].orders == 0, "the probe should have skipped the ORDER BY outright"
+    assert "date" in _app._ABSENT_COLUMNS.get("feedbacks", ()), "the refusal was not remembered"
+    _queries_after_first = _fake.tables["feedbacks"].selects          # sample + probe + the read
+    _again = _app.db_list("feedbacks", order="date", descending=True)
+    assert _again == [] and _fake.tables["feedbacks"].selects == _queries_after_first + 1, \
+        f"a cached refusal should cost one query, not { _fake.tables['feedbacks'].selects - _queries_after_first}"
+    _retried = _app.db_list("checkins", order="date", descending=True)
+    assert _retried == [], "the retry-after-refusal path did not return the rows"
+    assert _fake.tables["checkins"].orders == 1, "the retry should have run the refused query exactly once"
+    assert "date" in _app._ABSENT_COLUMNS.get("checkins", ()), "the retry did not teach db_list about the column"
+    _before_third = _fake.tables["checkins"].selects
+    _third = _app.db_list("checkins", order="date", descending=True)
+    assert _third == [] and _fake.tables["checkins"].orders == 1, "after learning, the ORDER BY must not be attempted again"
+    assert _fake.tables["checkins"].selects == _before_third + 1, "the learned refusal still re-probes"
+    print("  ok   empty tables degrade too: probe skipped the order, refusal retried once, then remembered")
 except Exception as _exc:                                              # noqa: BLE001
     fails.append(f"db_list did not survive a missing order column: {type(_exc).__name__}: {_exc}")
     print(f"  !! FAIL db_list vs a stale schema -> {type(_exc).__name__}: {_exc}")
@@ -631,6 +711,10 @@ if rvs:
          label="manager review")
 _, fb = call("GET", "/api/feedback", label="feedback list")
 show("feedback", [(f["from_label"], f["message"][:30], f["tag_list"]) for f in fb[:2]])
+_fb_dates = [str(f.get("date") or f.get("created_at") or "") for f in (fb or [])]
+assert _fb_dates == sorted(_fb_dates, reverse=True), f"feedback is not newest-first: {_fb_dates[:4]}"
+assert fb and all(f.get("date") for f in fb), "feedback rows have no date, so the ORDER BY sorts on nothing"
+show("feedback order", f"{len(fb)} row(s) newest-first from {_fb_dates[0]} to {_fb_dates[-1]}")
 call("POST", "/api/feedback", json_body={"to_employee_id": emps[1]["id"], "message": "nice"}, expect=(400,), label="short feedback blocked")
 call("POST", "/api/feedback", json_body={"to_employee_id": emps[1]["id"], "message": "Your runbook saved us an hour of paging.",
                                          "tags": "Teamwork, Mentoring", "category": "Appreciation", "is_anonymous": True}, label="send feedback")
@@ -746,14 +830,30 @@ expected = _dt.now(IST)
 
 
 def seconds_off(hhmmss, ref):
-    """How far a HH:MM[:SS] value is from a datetime, wrapping over midnight."""
-    parts = [int(x) for x in str(hhmmss)[:8].split(":") if x.isdigit()]
+    """How far a HH:MM[:SS] or "h:mm AM/PM" value is from a datetime, wrapping over midnight."""
+    text = str(hhmmss).strip().upper()
+    pm = None
+    if "AM" in text or "PM" in text:                # the labels the API renders for people
+        pm = "PM" in text
+        text = text.replace("AM", "").replace("PM", "").strip()
+    parts = [int(x) for x in text[:8].split(":") if x.strip().isdigit()]
     while len(parts) < 3:
         parts.append(0)
-    a = parts[0] * 3600 + parts[1] * 60 + parts[2]
+    hour = (parts[0] % 12) + (12 if pm else 0) if pm is not None else parts[0]
+    a = hour * 3600 + parts[1] * 60 + parts[2]
     b = ref.hour * 3600 + ref.minute * 60 + ref.second
     gap = abs(a - b)
     return min(gap, 86400 - gap)
+
+
+# the helper reads both shapes the API prints, so pin noon and midnight before trusting it:
+# "12:42 PM" once dropped its minutes ("42 PM".isdigit() is False) and reported a 42-minute drift.
+_dt = dt
+for _label, _at, _want in (("12:42 PM", (12, 42, 0), 0), ("12:42 AM", (0, 42, 0), 0),
+                           ("12:00 PM", (12, 0, 0), 0), ("11:30 AM", (11, 30, 0), 0),
+                           ("12:42:07", (12, 42, 7), 0), ("01:15 PM", (13, 15, 0), 0)):
+    if seconds_off(_label, _dt.datetime(2026, 1, 1, *_at)) > _want:
+        raise AssertionError(f"seconds_off misreads {_label!r}")
 
 
 drift = seconds_off(hh["office_time"], expected)
@@ -765,18 +865,49 @@ _, before = call("GET", "/api/attendance", want_keys=["rows"], label="attendance
 mine_row = next((a for a in before["rows"] if a.get("date") == expected.strftime("%Y-%m-%d")), None)
 _, clk = call("POST", "/api/attendance/clock", json_body={"action": "in", "location": "Testing"},
               expect=(200, 400), label="clock in")
-if clk.get("success"):
-    hhmm = clk["time"]
-    diff = seconds_off(hhmm, expected)
-    show("clocked in at", f"{hhmm} (IST now {expected.strftime('%H:%M')})")
-    assert diff <= 120, f"clock-in stamped {hhmm} but the office clock says {expected.strftime('%H:%M')}"
-    _, aft = call("GET", "/api/attendance", want_keys=["rows"], label="attendance after the punch")
-    row = next((a for a in aft["rows"] if str(a.get("date"))[:10] == expected.strftime("%Y-%m-%d")), None)
-    assert row, "the punch was filed on a date other than the office's today"
-    show("punch stored under", f"{row['date']} {row.get('clock_in')}")
-    stored = seconds_off(str(row.get("clock_in")), expected)
-    show("stored clock_in", f"{row.get('clock_in')} ({int(stored)}s from IST now)")
-    assert stored <= 240, f"stored clock_in {row.get('clock_in')} is not office time ({int(stored)}s off)"
+# The suite's session is the Employee's by now, and an Employee cannot clear a day, so this runs
+# as HR in a session of its own: it wipes today's punches, clocks in, and checks both the label the
+# API renders and the TIME it stored. Without the clear, a seeded day made the check skip silently.
+_sa = requests.Session()
+_hr = _sa.post(BASE + "/login", json={"email": "admin@company.com", "password": "demo123"}, timeout=60)
+checks[0] += 1
+if not _hr.ok:
+    fails.append(f"the wall-clock punch check could not sign in as HR: {_hr.status_code}")
+else:
+    _today = expected.strftime("%Y-%m-%d")
+    _month = expected.strftime("%Y-%m")
+    # HR sees everyone's attendance, so these rows have to be narrowed to the signed-in HR person
+    _hr_id = (_sa.get(BASE + "/api/me", timeout=60).json().get("employee") or {}).get("id")
+    _rows = _sa.get(BASE + f"/api/attendance?month={_month}", timeout=60).json()["rows"]
+    _mine = next((a for a in _rows if str(a.get("date"))[:10] == _today
+                  and a.get("employee_id") == _hr_id), None)
+    if _mine and (_mine.get("clock_in") or _mine.get("clock_out")):
+        _c = _sa.post(BASE + "/api/attendance/entry",
+                      json={"employee_id": _mine["employee_id"], "date": _today, "status": "Present",
+                                 "clock_in": None, "clock_out": None, "break_minutes": 0,
+                                 "note": "cleared by the wall-clock check"}, timeout=60)
+        if _c.status_code != 200:
+            fails.append(f"could not clear the HR day before punching: {_c.status_code} {_c.text[:120]}")
+    _p = _sa.post(BASE + "/api/attendance/clock", json={"action": "in", "location": "Testing"}, timeout=60)
+    _pj = _p.json() if "json" in _p.headers.get("Content-Type", "") else {}
+    checks[0] += 1
+    if not _pj.get("success"):
+        fails.append(f"HR clock-in on a cleared day did not succeed: {_p.status_code} {_pj.get('error')}")
+    else:
+        _after = _sa.get(BASE + f"/api/attendance?month={_month}", timeout=60).json()["rows"]
+        _row = next((a for a in _after if str(a.get("date"))[:10] == _today
+                     and a.get("employee_id") == _hr_id), None)
+        _label_off = seconds_off(_pj.get("time", ""), expected)
+        _stored_off = seconds_off(str(_row.get("clock_in")), expected) if _row else 99999
+        show("punch as HR", f"label {_pj.get('time')}, stored {_row and _row.get('clock_in')}, "
+                            f"filed on {_row and _row.get('date')}")
+        assert _label_off <= 120, \
+            f"the clock-in label {_pj.get('time')!r} is not the office time {expected.strftime('%H:%M')}"
+        assert _row is not None, "the punch was filed on a date other than the office's today"
+        assert _stored_off <= 240, f"stored clock_in {_row.get('clock_in')} is {int(_stored_off)}s off IST now"
+        # hand the day back closed, the way the seed had it
+        _sa.post(BASE + "/api/attendance/clock", json={"action": "out"}, timeout=60)
+
 _, tr = call("GET", "/api/stats", want_keys=["my_time"], label="tracker after the punch")
 show("tracker shows", f"{tr['my_time']['clock_in']} · {tr['my_time']['status']}")
 show("month the API defaulted to", before.get("month"))
