@@ -137,7 +137,8 @@ SUPA_COLUMNS = {
     "performance_reviews": {"employee_id", "reviewer_id", "period", "cycle_start", "cycle_end", "due_date",
                             "self_rating", "manager_rating", "final_rating", "potential", "strengths",
                             "improvements", "comments", "status", "competencies", "created_at" },
-    "feedbacks": {"from_employee_id", "to_employee_id", "message", "tags", "category", "is_anonymous", "created_at" },
+    "feedbacks": {"from_employee_id", "to_employee_id", "message", "tags", "category", "is_anonymous",
+                  "date", "created_at"},
     "checkins": {"employee_id", "manager_id", "date", "agenda", "notes", "next_steps", "status", "created_at" },
     "announcements": {"title", "content", "type", "created_by", "is_pinned", "date", "created_at" },
     "documents": {"employee_id", "title", "doc_type", "category", "purpose", "file_name", "file_url", "file_size",
@@ -245,7 +246,7 @@ def _matches(val, cond):
 def db_list(table, filters=None, order=None, descending=False, limit=None):
     """Read rows from Supabase when configured, otherwise from the demo store."""
     if supabase:
-        try:
+        def build(use_order, use_limit):
             query = supabase.table(table).select("*")
             for key, cond in (filters or {}).items():
                 if isinstance(cond, tuple):
@@ -264,32 +265,40 @@ def db_list(table, filters=None, order=None, descending=False, limit=None):
                     query = query.is_(key, None)
                 else:
                     query = query.eq(key, cond)
-            known = sample_columns(table)
-            # ordering by a column an older database lacks is a hard PostgREST error; the sort is
-            # cosmetic, so fall back to sorting the fetched rows instead of failing the whole screen
-            sql_order = bool(order) and (known is None or order in known)
-            if order and sql_order:
+            if order and use_order:
                 query = query.order(order, desc=descending)
-            if limit and sql_order:
+            if limit and use_limit:
                 query = query.limit(limit)
-            res = query.execute()
-            rows = [dict(r) for r in (res.data or [])]
-            if order and not sql_order:
-                rows = _sort_rows(rows, order, descending)
-                if limit:
-                    rows = rows[:limit]
-            return rows
+            return query
+
+        # ordering is cosmetic, so a column this database lacks must never fail the whole screen;
+        # filters are not cosmetic (they carry the row-level scoping) and are left to error loudly
+        sql_order = order_is_usable(table, order) if order else True
+        try:
+            res = build(sql_order, sql_order or not order).execute()
         except Exception as exc:                                          # noqa: BLE001
+            if order and sql_order and _names_missing_column(exc, order):
+                mark_column_absent(table, order)                          # remembered: no repeat cost
+                try:
+                    res = build(False, False).execute()
+                except Exception as retry_exc:                            # noqa: BLE001
+                    exc = retry_exc
+                else:
+                    rows = _sort_rows([dict(r) for r in (res.data or [])], order, descending)
+                    return rows[:limit] if limit else rows
             print(f"[db_list] {table}: {exc}")
             raise ApiError(_friendly_db_error(exc), 502) from exc
+        rows = [dict(r) for r in (res.data or [])]
+        if order and not sql_order:
+            rows = _sort_rows(rows, order, descending)
+            if limit:
+                rows = rows[:limit]
+        return rows
     rows = [dict(r) for r in _load_mock().get(table, [])]
     if filters:
         rows = [r for r in rows if all(_matches(r.get(k), v) for k, v in filters.items())]
     if order:
-        try:
-            rows.sort(key=lambda r: (r.get(order) is None, r.get(order)), reverse=descending)
-        except TypeError:
-            pass
+        rows.sort(key=lambda r: _sort_key(r.get(order)), reverse=descending)
     return rows[:limit] if limit else rows
 
 
@@ -872,11 +881,41 @@ def column_exists(table, column):
     """
     if not supabase:
         return None
+    if column in _ABSENT_COLUMNS.get(table, ()):
+        return False
+    probed = _COLUMN_PROBE.get((table, column))
+    if probed is not None:
+        return probed
     try:
         supabase.table(table).select(column).limit(1).execute()
-        return True
     except Exception as exc:                                              # noqa: BLE001
-        return False if "does not exist" in str(exc).lower() else None
+        if "does not exist" in str(exc).lower():
+            mark_column_absent(table, column)
+            _COLUMN_PROBE[(table, column)] = False
+            return False
+        return None                                                        # unreadable, not missing
+    _COLUMN_PROBE[(table, column)] = True
+    return True
+
+
+def order_is_usable(table, column):
+    """Can this database be asked to ORDER BY `column`? False means sort the rows in Python.
+
+    A sample row answers it when the table has rows. An *empty* table answers nothing, which is how
+    the first version of this guard still 502'd on the Performance tab: `feedbacks` and `checkins`
+    hold no rows yet, so `sample_columns` came back unknown, the ORDER BY went through, and
+    Postgres refused the `date` column the deployed schema does not have. So fall back to probing
+    the single column, and remember the answer.
+    """
+    if not supabase:
+        return True
+    known = sample_columns(table)
+    if known is not None:
+        if column in known:
+            return True
+        mark_column_absent(table, column)
+        return False
+    return column_exists(table, column) is not False
 
 
 @app.route("/api/schema-check")
@@ -1203,11 +1242,46 @@ def sample_columns(table):
     return found
 
 
-def _sort_rows(rows, key, descending):
+_COLUMN_PROBE = {}
+_ABSENT_COLUMNS = {}
+
+
+def _names_missing_column(exc, column):
+    text = str(exc).lower()
+    return "does not exist" in text and re.search(rf"\b{re.escape(column)}\b", text) is not None
+
+
+def mark_column_absent(table, column):
+    _ABSENT_COLUMNS.setdefault(table, set()).add(column)
+
+
+def _sort_key(value):
+    """A sort key that never raises, so an unsortable column cannot silently stay unsorted.
+
+    Empty and missing values sort last; numbers rank with numbers, text and dates with text, and
+    lists/dicts with their JSON. The rank prefix is what keeps the groups from ever being compared
+    to each other: mixing a `date` with a string used to raise TypeError inside the sort, which the
+    demo store swallowed and Postgres reported as a missing column.
+    """
+    if value is None or value == "":
+        return (1, 0.0, "")
+    if isinstance(value, bool):
+        return (0, float(value), "")
+    if isinstance(value, (int, float)):
+        return (0, float(value), "")
+    if isinstance(value, date):                    # datetime is a date subclass, so both land here
+        return (0, 0.0, value.isoformat())
+    if isinstance(value, (list, dict)):
+        return (2, 0.0, json.dumps(value, sort_keys=True, default=str))
+    text = str(value).strip()
     try:
-        return sorted(rows, key=lambda r: (r.get(key) is None, r.get(key)), reverse=descending)
-    except TypeError:
-        return rows
+        return (0, float(text), "")                # "9" before "10", not "10" before "9"
+    except ValueError:
+        return (0, 0.0, text)
+
+
+def _sort_rows(rows, key, descending):
+    return sorted(rows, key=lambda r: _sort_key(r.get(key)), reverse=descending)
 
 
 @app.route("/api/departments")
@@ -1457,9 +1531,9 @@ def api_employee_detail(row_id):
 EMPLOYEE_FIELDS = {"employee_code", "full_name", "email", "personal_email", "phone", "gender", "date_of_birth",
                    "date_of_joining", "department_id", "designation_id", "manager_id", "employment_type",
                    "work_location", "status", "salary_ctc", "avatar", "blood_group", "nationality", "address",
-                   "pan_no", "uan_no", "pf_no", "bank_name", "bank_account_no", "ifsc_code", "bank_account_name",
+                   "pan_no", "uan_no", "pf_no", "bank_name", "bank_account_no", "ifsc_code",
                    "emergency_contact_name", "emergency_contact_phone", "emergency_contact_relation", "exit_date",
-                   "exit_reason", "shift_id"}
+                   "exit_reason"}
 
 
 @app.route("/api/employees", methods=["POST"])
@@ -3268,7 +3342,7 @@ def api_candidates():
 
 CANDIDATE_FIELDS = {"job_id", "full_name", "email", "phone", "experience_years", "current_role", "current_ctc",
                     "expected_ctc", "stage", "rating", "source", "owner_id", "resume_url", "notes",
-                    "converted_employee_id", "skills", "location", "stage_changed_at"}
+                    "converted_employee_id", "stage_changed_at"}
 
 
 @app.route("/api/candidates", methods=["POST"])
