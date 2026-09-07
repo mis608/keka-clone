@@ -21,6 +21,7 @@ from dotenv import load_dotenv
 from flask import (Flask, render_template, request, jsonify, session, redirect,
                    url_for, flash, g, send_from_directory, Response)
 from flask_cors import CORS
+from werkzeug.exceptions import HTTPException
 from werkzeug.security import check_password_hash, generate_password_hash
 
 load_dotenv()
@@ -263,12 +264,21 @@ def db_list(table, filters=None, order=None, descending=False, limit=None):
                     query = query.is_(key, None)
                 else:
                     query = query.eq(key, cond)
-            if order:
+            known = sample_columns(table)
+            # ordering by a column an older database lacks is a hard PostgREST error; the sort is
+            # cosmetic, so fall back to sorting the fetched rows instead of failing the whole screen
+            sql_order = bool(order) and (known is None or order in known)
+            if order and sql_order:
                 query = query.order(order, desc=descending)
-            if limit:
+            if limit and sql_order:
                 query = query.limit(limit)
             res = query.execute()
-            return [dict(r) for r in (res.data or [])]
+            rows = [dict(r) for r in (res.data or [])]
+            if order and not sql_order:
+                rows = _sort_rows(rows, order, descending)
+                if limit:
+                    rows = rows[:limit]
+            return rows
         except Exception as exc:                                          # noqa: BLE001
             print(f"[db_list] {table}: {exc}")
             raise ApiError(_friendly_db_error(exc), 502) from exc
@@ -367,11 +377,22 @@ def db_delete(table, row_id):
 def _friendly_db_error(exc):
     text = str(exc)
     lowered = text.lower()
-    if "column" in lowered and "does not exist" in lowered or "could not find the" in lowered:
-        return ("Your database is missing a column this version needs. Run supabase_setup.sql "
-                "in the Supabase SQL editor, then reload the page.")
-    if "relation" in lowered and "does not exist" in lowered:
-        return "A table is missing. Run supabase_setup.sql in the Supabase SQL editor first."
+    # name the missing object: "Your database is missing a column" told nobody *which* one,
+    # and the screen looked like an app crash rather than a schema that is one version behind
+    missing_col = re.search(r'column (?:[a-z_]+\.)?([a-z_0-9]+) does not exist', text, re.I)
+    missing_rel = re.search(r'relation "?([a-z_0-9]+)"? does not exist', text, re.I)
+    if missing_rel:
+        return (f"Your database has no {missing_rel.group(1)} table. Run supabase_setup.sql in the "
+                "Supabase SQL editor (it creates what is absent and never rewrites rows), then reload.")
+    if missing_col or "could not find the" in lowered:
+        which = missing_col.group(1) if missing_col else "a column"
+        return (f"Your database is missing {which}. Run supabase_setup.sql in the Supabase SQL editor "
+                "- it only adds what is missing and never touches existing rows - then reload. "
+                "GET /api/schema-check lists every gap.")
+    if "column" in lowered and "does not exist" in lowered:
+        return ("Your database is missing a column this version needs. Run supabase_setup.sql in the "
+                "Supabase SQL editor (it adds missing columns only), then reload. GET /api/schema-check "
+                "lists every gap.")
     if "invalid input syntax for type uuid" in lowered:
         return "A record points at a row that no longer exists. Re-save it with a valid selection."
     if "duplicate key" in lowered:
@@ -724,6 +745,24 @@ def handle_404(err):
     return err
 
 
+@app.errorhandler(Exception)
+def handle_unexpected_error(err):
+    """A crash inside an /api route still has to answer JSON.
+
+    Without this Flask sends its HTML debug page, and the toast on the screen pasted the whole
+    `<!doctype html> ... 500 Internal Server Error` at the user instead of a sentence they can act on.
+    The traceback is logged, HTTP exceptions (404/405/redirects) pass through untouched, and pages
+    keep Flask's own handling.
+    """
+    if isinstance(err, HTTPException):
+        return err            # a 404/405 keeps its own status; re-raising here would wrap it into a 500
+    if not request.path.startswith("/api/"):
+        raise err             # pages keep Flask's normal error rendering
+    app.logger.exception("Unhandled error on %s %s", request.method, request.path)
+    detail = f"{type(err).__name__}: {err}" if app.debug else "The request failed unexpectedly."
+    return jsonify({"success": False, "error": f"{detail} The server log has the traceback."}), 500
+
+
 @app.errorhandler(413)
 def handle_too_large(err):
     return jsonify({"success": False, "error": "That file is too large for the upload limit"}), 413
@@ -822,6 +861,68 @@ def api_login_hint():
         if email and e.get("status") == "Active" and email not in ADMIN_EMAILS:
             return jsonify({"email": email, "name": e.get("full_name")})
     return jsonify({"email": None, "name": None})
+
+
+def column_exists(table, column):
+    """Ask PostgREST directly whether one column can be selected (True / False / None if unreadable).
+
+    Comparing SUPA_COLUMNS with a sample row is only a *candidate* list: a nullable column that is
+    NULL in every sampled row simply has no key, so it has to be confirmed before anyone is told to
+    run SQL.
+    """
+    if not supabase:
+        return None
+    try:
+        supabase.table(table).select(column).limit(1).execute()
+        return True
+    except Exception as exc:                                              # noqa: BLE001
+        return False if "does not exist" in str(exc).lower() else None
+
+
+@app.route("/api/schema-check")
+@admin_required
+def api_schema_check():
+    """Compare the connected database with what this build of the app expects.
+
+    This is the answer to the one question a "run supabase_setup.sql" toast should have asked
+    back: is my schema actually behind, and by how much. Read-only; each candidate gap is
+    confirmed with a direct probe so a column that is merely NULL is never reported as missing.
+    """
+    tables_missing, columns_missing, unverifiable = [], {}, []
+    if not supabase:
+        return jsonify({"mode": "demo", "tables_expected": len(SUPA_COLUMNS), "tables_missing": [],
+                        "columns_missing": {}, "unverifiable": [], "gaps": 0, "up_to_date": True,
+                        "advice": "Demo store: the tables are rebuilt from this build on boot, "
+                                  "so there is nothing to migrate. Connect Supabase to use this check."})
+    for table, wanted in sorted(SUPA_COLUMNS.items()):
+        try:
+            res = supabase.table(table).select("*").limit(500).execute()
+        except Exception as exc:                                          # noqa: BLE001
+            if "does not exist" in str(exc).lower():
+                tables_missing.append(table)
+            else:
+                unverifiable.append({"table": table, "reason": _friendly_db_error(exc)[:160]})
+            continue
+        seen = set()
+        for row in (res.data or []):
+            seen.update(row.keys())
+        for column in sorted(set(wanted) - seen):
+            if column_exists(table, column) is False:
+                columns_missing.setdefault(table, []).append(column)
+    gaps = len(tables_missing) + sum(len(v) for v in columns_missing.values())
+    return jsonify({
+        "mode": "supabase",
+        "tables_expected": len(SUPA_COLUMNS),
+        "tables_missing": tables_missing,
+        "columns_missing": {k: v for k, v in sorted(columns_missing.items())},
+        "unverifiable": unverifiable,
+        "gaps": gaps,
+        "up_to_date": gaps == 0,
+        "advice": ("Nothing to do - the database matches this version." if not gaps else
+                   "Run supabase_setup.sql in the Supabase SQL editor. It is idempotent: it creates the "
+                   "missing tables and adds only the columns listed here, and it never updates or deletes "
+                   "rows you already have."),
+    })
 
 
 @app.route("/api/health")
@@ -1078,6 +1179,37 @@ def api_stats():
 
 
 # =================================================================== lookups
+_COLUMN_CACHE = {}
+
+
+def sample_columns(table):
+    """Column names the connected database really has, or None when it cannot be told.
+
+    PostgREST will not expose information_schema, so one sample row is the cheapest honest answer:
+    its keys are real columns. An empty table gives nothing back and the caller then behaves exactly
+    as before. Cached per request-process because the answer cannot change under us.
+    """
+    if table in _COLUMN_CACHE:
+        return _COLUMN_CACHE[table]
+    found = None
+    if supabase:
+        try:
+            res = supabase.table(table).select("*").limit(1).execute()
+            if res.data:
+                found = set(res.data[0].keys())
+        except Exception:                                                # noqa: BLE001
+            found = None
+    _COLUMN_CACHE[table] = found
+    return found
+
+
+def _sort_rows(rows, key, descending):
+    try:
+        return sorted(rows, key=lambda r: (r.get(key) is None, r.get(key)), reverse=descending)
+    except TypeError:
+        return rows
+
+
 @app.route("/api/departments")
 def api_departments():
     depts = db_list("departments")
@@ -1101,6 +1233,64 @@ def api_departments():
                                     db_list("jobs", {"department_id": d.get("id"), "status": "Open"})),
                     "designations": [x.get("title") for x in desigs if str(x.get("department_id")) == str(d.get("id"))]})
     return jsonify(out)
+
+
+DEPARTMENT_FIELDS = {"name", "description", "head_id"}
+
+
+def _clean_department(data, current=None):
+    """Validate a department form into a write payload (name unique, head must be a person)."""
+    name = (data.get("name") or "").strip()
+    if not name:
+        raise ApiError("A department needs a name")
+    if len(name) > 60:
+        raise ApiError("Keep the department name under 60 characters")
+    clash = next((d for d in db_list("departments") if str(d.get("name")).strip().lower() == name.lower()
+                  and str(d.get("id")) != str(current)), None)
+    if clash:
+        raise ApiError(f"{name} already exists (id {clash.get('id')}) - rename it or edit that one")
+    payload = {"name": name, "description": (data.get("description") or "").strip()[:300] or None}
+    head = data.get("head_id")
+    if head in (None, "", "None", "All"):
+        payload["head_id"] = None
+    else:
+        person = db_get("employees", head)
+        if not person:
+            raise ApiError("The department head must be one of the employees on the list")
+        payload["head_id"] = str(head)
+    return payload
+
+
+@app.route("/api/departments", methods=["POST"])
+@admin_required
+def api_department_create():
+    data = request.get_json(silent=True) or {}
+    created = db_insert("departments", _clean_department(data))
+    return jsonify({"success": True, "department": created,
+                    "message": f"{created.get('name')} created - assign people to it from any employee's profile"})
+
+
+@app.route("/api/departments/<row_id>", methods=["PUT", "DELETE"])
+@admin_required
+def api_department_row(row_id):
+    dept = db_get("departments", row_id)
+    if not dept:
+        raise ApiError("Department not found", 404)
+    if request.method == "DELETE":
+        members = [e for e in db_list("employees") if str(e.get("department_id")) == str(row_id)
+                   and e.get("status") != "Exited"]
+        if members:
+            raise ApiError(f"{dept.get('name')} still has {len(members)} person(s) in it - move them to another "
+                           "department first (Edit on their profile) and then delete it")
+        for table, key in (("designations", "department_id"), ("jobs", "department_id")):
+            linked = [r for r in db_list(table) if str(r.get(key)) == str(row_id)]
+            for r in linked:
+                db_update(table, r["id"], {key: None})
+        db_delete("departments", row_id)
+        return jsonify({"success": True, "message": f"{dept.get('name')} deleted"})
+    data = request.get_json(silent=True) or {}
+    updated = db_update("departments", row_id, _clean_department(data, current=row_id))
+    return jsonify({"success": True, "department": updated, "message": f"{updated.get('name')} saved"})
 
 
 @app.route("/api/designations")
