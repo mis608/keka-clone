@@ -368,6 +368,82 @@ call("GET", "/api/timesheet/export", label="csv export")
 _, prj = call("GET", "/api/projects", label="projects")
 show("projects", [(p["code"], p["hours_this_week"], p["total_hours"], p["billable_value"]) for p in prj])
 
+print("== org: departments, schema check and error envelopes ==")
+_, depts = call("GET", "/api/departments", label="departments list")
+made = None
+_, created = call("POST", "/api/departments", json_body={"name": "Field Operations", "description": "On-site support"},
+                  want_keys=["department", "message"], label="HR Admin can create a department")
+made = (created or {}).get("department", {}).get("id")
+assert made, "the created department came back without an id"
+_, again = call("GET", "/api/departments", label="departments after create")
+row = next((d for d in again if d["name"] == "Field Operations"), None)
+assert row and row["employee_count"] == 0 and row["description"] == "On-site support", f"new department not listed correctly: {row}"
+show("created department", {k: row[k] for k in ("id", "name", "employee_count", "head_id")})
+call("POST", "/api/departments", json_body={"name": "field operations "}, expect=(400,), label="duplicate name refused (case/space insensitive)")
+call("POST", "/api/departments", json_body={"name": "   "}, expect=(400,), label="blank name refused")
+call("POST", "/api/departments", json_body={"name": "Odd Head", "head_id": "e9999"}, expect=(400,), label="unknown head refused")
+_, renamed = call("PUT", f"/api/departments/{made}", json_body={"name": "Field Operations & Safety"},
+                  want_keys=["department", "message"], label="department rename")
+assert (renamed.get("department") or {}).get("name") == "Field Operations & Safety", "rename did not stick"
+busy_id = next(d["id"] for d in again if d["employee_count"] > 0)
+r, j = call("DELETE", f"/api/departments/{busy_id}", expect=(400,), label="a department with people cannot be deleted")
+assert "move them" in (j.get("error") or "").lower(), f"the refusal did not say what to do: {j}"
+r, j = call("DELETE", f"/api/departments/{made}", expect=(200,), label="empty department deleted")
+assert not [d for d in call("GET", "/api/departments", label="departments after delete")[1] if d["id"] == made], "delete did not remove the row"
+call("DELETE", "/api/departments/d-nope", expect=(404,), label="unknown department id is a 404")
+call("GET", "/api/schema-check", want_keys=["gaps", "up_to_date", "advice", "tables_expected"], label="schema check for HR")
+_, sc = call("GET", "/api/schema-check", label="schema check body")
+show("schema check", {k: sc[k] for k in ("mode", "tables_expected", "gaps", "up_to_date")})
+assert sc["tables_expected"] == 25 and isinstance(sc["gaps"], int) and sc["advice"], "schema check is not telling us anything"
+checks[0] += 1
+emp2 = requests.Session()
+emp2.post(BASE + "/login", json={"email": "aarav.sharma@company.com", "password": "demo123"}, timeout=60)
+_refused = []
+for method, path, payload in (("POST", "/api/departments", {"name": "Sneaky"}),
+                              ("PUT", f"/api/departments/{busy_id}", {"name": "Sneaky"}),
+                              ("DELETE", f"/api/departments/{busy_id}", None),
+                              ("GET", "/api/schema-check", None)):
+    rr = emp2.request(method, BASE + path, json=payload, timeout=60)
+    if rr.status_code != 403:
+        _refused.append(f"{method} {path} -> {rr.status_code}")
+if _refused:
+    fails.append("an Employee was not refused the HR-only department/schema endpoints: " + "; ".join(_refused))
+    print("  !! FAIL employee cannot touch departments/schema -> " + "; ".join(_refused))
+else:
+    print("  ok   an Employee is refused 403 on department writes and on /api/schema-check")
+
+# a crash inside an /api route must answer JSON - the HTML debug page used to be pasted into the toast
+import importlib
+_app = importlib.import_module("app")
+
+
+def _boom():
+    raise RuntimeError("deliberate crash to prove the error envelope")
+
+
+_app.app.add_url_rule("/api/__selftest_boom", "selftest_boom", _boom, methods=["GET"])
+_client = _app.app.test_client()
+with _client.session_transaction() as _sess:
+    _sess["user"] = {"email": "admin@company.com", "name": "Suite", "is_admin": True, "modules": ["home"]}
+_res = _client.get("/api/__selftest_boom")
+assert _res.status_code == 500, f"expected 500, got {_res.status_code}"
+assert _res.is_json, f"a crash on /api returned {_res.content_type}: {_res.get_data(as_text=True)[:120]}"
+_404 = _client.get("/api/no-such-endpoint")
+assert _404.status_code == 404 and _404.is_json, f"a missing /api route became {_404.status_code} {_404.content_type}"
+_msg = (_res.get_json() or {}).get("error", "")
+assert "server log" in _msg, f"the JSON error is not actionable: {_msg!r}"   # the detail stays in the log, not in the toast
+del _app.app.view_functions["selftest_boom"]
+_ok = _res.get_json()
+show("error envelope", {"status": _res.status_code, "json": True, "error": _ok["error"][:70]})
+_, perf = call("GET", "/api/performance/overview",
+              want_keys=["nine_box", "rating_distribution", "avg_rating", "goals_total", "at_risk"],
+              label="performance overview answers")
+if isinstance(perf, dict):
+    show("performance", {k: perf[k] for k in ("goals_total", "reviews_total", "avg_rating")} |
+         {"nine_box_cells": len(perf["nine_box"])})
+    assert sum(perf["rating_distribution"].values()) <= perf["reviews_total"], "rating buckets counted reviews that do not exist"
+
+
 print("== payroll & expenses ==")
 call("GET", "/api/payslips", label="payslips")
 _, ps = call("GET", "/api/payslips", label="payslips list")
@@ -452,6 +528,81 @@ call("DELETE", f"/api/jobs/{jid}", label="delete now-empty job")
 call("DELETE", f"/api/employees/{hired['employee']['id']}", label="remove test hire")
 
 print("== performance ==")
+# ---- the Supabase read path, against a fake client whose schema is one version behind.
+# Reads use select("*") so a missing column is invisible - but ORDER BY a column the database does
+# not have is a hard PostgREST error, which is what took the Performance tab down. db_list() now
+# checks the live columns and sorts the fetched rows itself.
+class _FakeResult:
+    def __init__(self, data):
+        self.data = data
+
+
+class _FakeTable:
+    def __init__(self, name, cols, rows):
+        self.name, self.cols, self.rows, self.ordered_by = name, set(cols), rows, None
+
+    def select(self, _cols):
+        return self
+
+    def limit(self, _n):
+        return self
+
+    def eq(self, *_a): return self
+    def gte(self, *_a): return self
+    def lte(self, *_a): return self
+    def neq(self, *_a): return self
+    def is_(self, *_a): return self
+    def in_(self, *_a): return self
+
+    def order(self, col, desc=False):
+        if col not in self.cols:
+            raise RuntimeError(f"column {self.name}.{col} does not exist")
+        self.ordered_by = col
+        return self
+
+    def execute(self):
+        return _FakeResult([{k: r.get(k) for k in self.cols if k in r} for r in self.rows])
+
+
+class _FakeSupabase:
+    """Rows come back carrying only the columns this older database actually has."""
+
+    def __init__(self, drop):
+        self.drop, self.tables = drop, {}
+
+    def table(self, name):
+        if name not in self.tables:
+            store = _app._load_mock().get(name, [])
+            cols = [c for c in sorted(set(_app.SUPA_COLUMNS.get(name, set())) | {"id"})
+                    if c not in self.drop.get(name, ())]
+            self.tables[name] = _FakeTable(name, cols, store)
+        return self.tables[name]
+
+
+checks[0] += 1
+_fake = _FakeSupabase({"performance_reviews": {"cycle_start"}, "goals": set()})
+_saved_supa, _app.supabase = _app.supabase, _fake
+_app._COLUMN_CACHE.clear()
+try:
+    _rows = _app.db_list("performance_reviews", order="cycle_start", descending=True)
+    _kept = _app.db_list("goals", order="due_date")
+    assert _rows and _fake.tables["performance_reviews"].ordered_by is None, \
+        "the fake client should never have been asked to order by the missing column"
+    assert _fake.tables["goals"].ordered_by == "due_date", "an ordering the database supports must stay in SQL"
+    # with the order column gone there is nothing to order by, so the rows must simply come back
+    assert all("cycle_start" not in r for r in _rows), "the fake DB was asked to return a column it does not have"
+    _probe = [{"id": 1, "d": "2026-01-02"}, {"id": 2, "d": "2026-01-03"}, {"id": 3, "d": "2026-01-01"}]
+    assert [r["id"] for r in _app._sort_rows(_probe, "d", True)] == [2, 1, 3], "the python fallback sort is wrong"
+    assert [r["id"] for r in _app._sort_rows(_probe, "not_a_column", False)] == [1, 2, 3], \
+        "sorting by an absent key must leave the order alone, not crash"
+    print(f"  ok   a stale schema degrades instead of failing: {len(_rows)} review(s) back, SQL order skipped")
+except Exception as _exc:                                              # noqa: BLE001
+    fails.append(f"db_list did not survive a missing order column: {type(_exc).__name__}: {_exc}")
+    print(f"  !! FAIL db_list vs a stale schema -> {type(_exc).__name__}: {_exc}")
+finally:
+    _app.supabase = _saved_supa
+    _app._COLUMN_CACHE.clear()
+
 _, perf = call("GET", "/api/performance/overview", want_keys=["goals_total", "rating_distribution", "nine_box_counts", "departments"], label="overview")
 show("overview", {k: perf[k] for k in ("goals_total", "avg_goal_progress", "reviews_total", "avg_rating", "feedback_count",
                                        "checkins_total", "pending_self_review", "pending_manager_review")})
