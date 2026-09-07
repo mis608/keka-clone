@@ -299,6 +299,44 @@ async function main() {
   if (/No head assigned/.test(text('#orgChartContainer'))) fail('org', 'a department reports no head even though the API has one');
   window.eval("setOrgTab('tree'); orgExpandAll(true); orgZoom(-0.1)"); await wait(400);
   if (junkIn('#orgChartContainer').length) fail('org', `junk: ${junkIn('#orgChartContainer').join(', ')}`);
+
+  // departments: the app used to have no UI for this at all, so "add a department" meant SQL
+  window.eval("setOrgTab('dept')"); await wait(500);
+  const depAdd = [...doc.querySelectorAll('#module-orgchart button')].find(b => /add department/i.test(b.textContent));
+  if (!depAdd) fail('departments', 'the org toolbar has no Add department control');
+  else {
+    depAdd.dispatchEvent(new window.MouseEvent('click', { bubbles: true })); await wait(500);
+    const depNameEl = doc.querySelector('#dept_name'), depHeadEl = doc.querySelector('#dept_head');
+    const depOpen = !doc.querySelector('#modalBackdrop').classList.contains('hidden');
+    if (!depNameEl || !depHeadEl || !depOpen) fail('departments', 'the Add department modal never opened');
+    else {
+      ok('departments', `modal opens with a name field and a ${count('#dept_head option')}-option head picker`);
+      const depLabel = 'Harness Team ' + Date.now().toString(36).slice(-4);
+      depNameEl.value = depLabel;
+      doc.querySelector('#dept_desc').value = 'created by the DOM harness';
+      const depSave = [...doc.querySelectorAll('#modalFoot button')].find(b => /create department/i.test(b.textContent));
+      if (!depSave) fail('departments', 'the footer has no Create department button');
+      else {
+        depSave.dispatchEvent(new window.MouseEvent('click', { bubbles: true })); await wait(1700);
+        const depList = (await api('/api/departments')).body;
+        const depMine = (Array.isArray(depList) ? depList : []).find(d => d.name === depLabel);
+        if (!depMine) fail('departments', `${depLabel} was saved but /api/departments does not list it`);
+        else {
+          ok('departments', `${depMine.name} created through the UI (id ${depMine.id}, ${depMine.employee_count} people)`);
+          if (!doc.querySelector('#modalBackdrop').classList.contains('hidden')) fail('departments', 'the modal stayed open after saving');
+          const depEditBtn = [...doc.querySelectorAll('#orgChartContainer button[title^="Rename"]')];
+          if (!depEditBtn.length) fail('departments', 'a department card has no rename/head control for HR');
+          else ok('departments', `${depEditBtn.length} department card(s) offer rename and delete to HR`);
+          const depDel = await api(`/api/departments/${depMine.id}`, { method: 'DELETE' });
+          if (depDel.status !== 200) fail('departments', `cleanup delete returned ${depDel.status}`);
+          window.eval("loadOrgChart(true)"); await wait(900);
+          if ((text('#orgChartContainer')).includes(depLabel)) fail('departments', 'the deleted department is still on the card list');
+          else ok('departments', 'delete removes the card and an empty team is deletable');
+        }
+      }
+    }
+    window.eval('closeAllModals()');
+  }
   // “Download PNG” must write a real image containing the API's people, not open the print dialog
   const orgApi = (await api('/api/orgchart')).body;
   const rootName = (orgApi.tree && orgApi.tree[0] && orgApi.tree[0].name) || '';
@@ -588,6 +626,12 @@ async function main() {
     if (!mods.includes(`"${mod}"`)) fail('roles', `the server withheld '${mod}' from an Employee`);
   }
   ok('roles', `Employee modules granted: ${JSON.parse(mods).length} of ${MODULES.length}`);
+  // gating hides admin-only markup (it does not delete it), so visibility is the question
+  const empDepMarked = [...edoc.querySelectorAll('#module-orgchart [data-admin-only], #module-orgchart button')]
+    .filter(el => /add department|rename or change|delete this empty/i.test((el.title || '') + ' ' + (el.textContent || '')));
+  const empDepVisible = empDepMarked.filter(el => !el.classList.contains('hidden') && el.style.display !== 'none' && !el.closest('.hidden'));
+  if (empDepVisible.length) fail('roles', `${empDepVisible.length} department control(s) are still clickable for an Employee: ${empDepVisible.map(e => e.textContent.trim()).join(' | ')}`);
+  else ok('roles', `${empDepMarked.length} department control(s) present but hidden from the Employee role`);
   edoc.defaultView.eval("switchModule('employees')"); await wait(400);
   const active = (edoc.querySelector('.module-section.active') || {}).id;
   if (active !== 'module-home') fail('roles', `switchModule('employees') landed on ${active} instead of home`);
