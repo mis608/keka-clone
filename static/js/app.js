@@ -468,15 +468,119 @@ function renderTracker(t) {
     outBtn.textContent = t.clocked_out ? 'Clocked out' : 'Clock out';
   }
   $('#trackerShift') && ($('#trackerShift').textContent = t.shift_label || '');
+  const locRow = $('#trackerLocationRow');
+  if (locRow) {
+    const loc = t.location || '';
+    if (loc && (t.clocked_in || t.clocked_out)) {
+      locRow.classList.remove('hidden');
+      $('#trackerLocationVal').textContent = loc;
+      const coords = extractCoords(loc);
+      const mapLink = $('#trackerMapLink');
+      if (mapLink) {
+        if (coords) {
+          mapLink.href = `https://www.google.com/maps?q=${coords.lat},${coords.lng}`;
+          mapLink.classList.remove('hidden');
+          mapLink.classList.add('flex');
+        } else {
+          mapLink.classList.add('hidden');
+          mapLink.classList.remove('flex');
+        }
+      }
+    } else {
+      locRow.classList.add('hidden');
+    }
+  }
+}
+
+function extractCoords(str) {
+  if (!str) return null;
+  const m = String(str).match(/(-?\d+\.\d{3,8})\s*,\s*(-?\d+\.\d{3,8})/);
+  return m ? { lat: m[1], lng: m[2] } : null;
+}
+
+function formatLocationCell(loc) {
+  if (!loc || loc === '—') return '<span class="text-[#c9ccdb]">—</span>';
+  const coords = extractCoords(loc);
+  if (coords) {
+    return `<a href="https://www.google.com/maps?q=${coords.lat},${coords.lng}" target="_blank" rel="noopener" class="text-[#584ac0] hover:underline inline-flex items-center gap-1.5 font-medium" title="View on Google Maps">
+      <i class="fas fa-location-dot text-[#ff5a5a] text-[11px]"></i><span>${esc(loc)}</span>
+      <i class="fas fa-arrow-up-right-from-square text-[9px] text-[#8b8fa3]"></i>
+    </a>`;
+  }
+  return `<span class="inline-flex items-center gap-1 text-[#4b4f63]"><i class="fas fa-location-dot text-[#8b8fa3] text-[11px]"></i><span>${esc(loc)}</span></span>`;
+}
+
+async function getDeviceLocation() {
+  if (!navigator.geolocation) {
+    return 'Office (GPS Not Supported)';
+  }
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      resolve('Office (GPS Timed Out)');
+    }, 6500);
+
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        clearTimeout(timer);
+        const lat = pos.coords.latitude.toFixed(4);
+        const lng = pos.coords.longitude.toFixed(4);
+        try {
+          const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=14`, {
+            headers: { 'Accept': 'application/json' },
+            signal: AbortSignal.timeout(2500)
+          });
+          if (res.ok) {
+            const data = await res.json();
+            const addr = data.address || {};
+            const area = addr.suburb || addr.neighbourhood || addr.city_district || addr.residential || addr.town || addr.village || '';
+            const city = addr.city || addr.state_district || addr.county || addr.state || '';
+            const place = [area, city].filter(Boolean).filter((v, i, a) => a.indexOf(v) === i).join(', ');
+            if (place) {
+              resolve(`${place} (${lat}, ${lng})`);
+              return;
+            }
+          }
+        } catch (e) {
+          // Fallback to coordinates
+        }
+        resolve(`${lat}, ${lng}`);
+      },
+      (err) => {
+        clearTimeout(timer);
+        if (err.code === 1) {
+          resolve('Office (GPS Permission Denied)');
+        } else if (err.code === 2) {
+          resolve('Office (GPS Position Unavailable)');
+        } else {
+          resolve('Office (GPS Error)');
+        }
+      },
+      { enableHighAccuracy: true, timeout: 6000, maximumAge: 30000 }
+    );
+  });
 }
 
 async function clockAction(action) {
+  const btn = action === 'in' ? $('#btnClockIn') : $('#btnClockOut');
+  const origText = btn ? btn.innerHTML : '';
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = `<span class="inline-flex items-center gap-1.5"><i class="fas fa-location-dot animate-pulse text-[#ff5a5a]"></i> Locating…</span>`;
+  }
   try {
     const res = await api('/api/attendance/clock', { method: 'POST', body: { action } });
+    const loc = await getDeviceLocation();
+    const res = await api('/api/attendance/clock', { method: 'POST', body: { action, location: loc } });
     toast(res.message, 'success');
     loadDashboard(true);
     if (currentModule === 'attendance') loadAttendance(true);
   } catch (e) { /* toast already shown */ }
+  } catch (e) {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = origText;
+    }
+  }
 }
 
 function renderTodayWidget(t) {
@@ -1408,6 +1512,7 @@ function renderAttendanceTable() {
     <td class="num text-[12px] text-[#6b7085]">${num(a.break_minutes) || '—'}</td>
     <td>${statusPill(a.status)}</td>
     <td class="text-[12.5px]">${esc(a.location || '—')}</td>
+    <td class="text-[12.5px]">${formatLocationCell(a.location)}</td>
     <td class="text-[12px]">${a.regularization_status && a.regularization_status !== 'None' ? statusPill(a.regularization_status) : '<span class="text-[#c9ccdb]">—</span>'}</td>
     <td class="text-right"><div class="row-actions inline-flex gap-1">
       <button onclick="event.stopPropagation();openRegularizeForm('${a.date}','${a.employee_id}')" class="btn btn-ghost btn-xs !py-1" title="Request a correction"><i class="fas fa-pen-to-square"></i> Regularize</button>
@@ -1447,6 +1552,7 @@ function openDayDetail(day, empId) {
   const info = (l, v) => `<div class="bg-[#f6f7fb] rounded-xl p-3"><div class="text-[10.5px] uppercase tracking-widest text-[#8b8fa3] font-semibold">${l}</div><div class="text-[13.5px] font-medium mt-1 num">${v || '—'}</div></div>`;
   openModal(fmtDate(day, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }),
     `<div class="grid grid-cols-2 md:grid-cols-4 gap-3">${info('Employee', esc(rec.employee_name))}${info('Clock in', esc(rec.clock_in_label))}${info('Clock out', esc(rec.clock_out_label))}${info('Worked', esc(rec.worked_label))}${info('Break', num(rec.break_minutes) + ' min')}${info('Status', statusPill(rec.status))}${info('Location', esc(rec.location || '—'))}${info('Correction', statusPill(rec.regularization_status))}</div>${rec.note ? `<div class="mt-3 text-[12.5px] text-[#6b7085] bg-[#fff4e6] rounded-xl p-3"><b>Note:</b> ${esc(rec.note)}</div>` : ''}`,
+    `<div class="grid grid-cols-2 md:grid-cols-4 gap-3">${info('Employee', esc(rec.employee_name))}${info('Clock in', esc(rec.clock_in_label))}${info('Clock out', esc(rec.clock_out_label))}${info('Worked', esc(rec.worked_label))}${info('Break', num(rec.break_minutes) + ' min')}${info('Status', statusPill(rec.status))}${info('Location', formatLocationCell(rec.location))}${info('Correction', statusPill(rec.regularization_status))}</div>${rec.note ? `<div class="mt-3 text-[12.5px] text-[#6b7085] bg-[#fff4e6] rounded-xl p-3"><b>Note:</b> ${esc(rec.note)}</div>` : ''}`,
     `<button onclick="openRegularizeForm('${day}','${rec.employee_id}');closeAllModals()" class="btn btn-ghost mr-auto"><i class="fas fa-pen-to-square"></i> Request a correction</button>${isAdmin() ? `<button onclick="openManualAttendance('${rec.employee_id}','${day}');closeAllModals()" class="btn btn-primary btn-xs"><i class="far fa-edit"></i> Edit record</button>` : ''}<button onclick="closeAllModals()" class="btn btn-ghost">Close</button>`);
 }
 function renderRegPanel(regs) {
