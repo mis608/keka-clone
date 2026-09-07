@@ -31,22 +31,11 @@ load_dotenv()
 from clock import TZ_LABEL as APP_TZ_LABEL, now_local, offset_minutes, today
 
 APP_DIR = os.path.abspath(os.path.dirname(__file__))
-
-# Serverless environments (e.g. Vercel) have a read-only filesystem except /tmp
-if os.getenv("VERCEL") or os.getenv("AWS_LAMBDA_FUNCTION_NAME"):
-    UPLOAD_DIR = os.path.join("/tmp", "uploads")
-    MOCK_STORE_PATH = os.path.join("/tmp", "mock_store.json")
-else:
-    UPLOAD_DIR = os.path.join(APP_DIR, "uploads")
-    MOCK_STORE_PATH = os.path.join(APP_DIR, "data", "mock_store.json")
-
+UPLOAD_DIR = os.path.join(APP_DIR, "uploads")
+MOCK_STORE_PATH = os.path.join(APP_DIR, "data", "mock_store.json")
 MOCK_PERSIST = os.getenv("MOCK_PERSIST", "true").lower() != "false"
 
-app = Flask(
-    __name__,
-    template_folder=os.path.join(APP_DIR, "templates"),
-    static_folder=os.path.join(APP_DIR, "static")
-)
+app = Flask(__name__)
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "keka-clone-secret-key-2026-super-secure")
 app.config["MAX_CONTENT_LENGTH"] = 25 * 1024 * 1024        # 25 MB uploads
 CORS(app)
@@ -1182,8 +1171,6 @@ def api_stats():
         "shift_label": f"{shift.get('name', 'General Shift')} • {fmt_time(shift.get('start_time'))} - {fmt_time(shift.get('end_time'))}",
         "record_id": (mine or {}).get("id"),
         "regularization_status": (mine or {}).get("regularization_status") or "None",
-        "location": (mine or {}).get("location") or "",
-        "note": (mine or {}).get("note") or "",
     }
 
     holidays = sorted([h for h in db_list("holidays") if (parse_day(h.get("date")) or day) >= day], key=lambda x: str(x.get("date")))
@@ -2233,11 +2220,10 @@ def api_attendance_clock():
             raise ApiError(f"Today is already closed - in {fmt_time(ci)}, out {fmt_time(co)}. "
                            "If a punch is wrong, use Attendance -> Regularization or ask HR to edit the record.")
         late = (now.hour * 60 + now.minute) > (minutes_of(shift.get("start_time")) or 570) + grace
-        loc = (data.get("location") or "").strip() or "Office"
         payload = {"employee_id": employee_id, "date": today_s, "clock_in": stamp,
-                   "status": "Present", "is_late": bool(late), "location": loc,
+                   "status": "Present", "is_late": bool(late), "location": data.get("location") or "Office",
                    "shift_id": shift.get("id"), "break_minutes": 0, "work_hours": 0,
-                   "note": f"Clocked in from {loc}"}
+                   "note": "Self clock-in" if not data.get("location") else f"Clock-in from {data.get('location')}"}
         if broken:
             payload["clock_out"] = None
             payload["note"] = "Reopened: the recorded clock-out was before the clock-in"
@@ -2256,15 +2242,8 @@ def api_attendance_clock():
         end = max(now.hour * 60 + now.minute, start)
         brk = int(money(existing.get("break_minutes") or 45))
         hours = round(max(money(existing.get("work_hours")), (end - start - brk) / 60), 2)
-        loc_out = (data.get("location") or "").strip()
-        update_fields = {"clock_out": stamp, "work_hours": hours,
-                         "status": "Present" if hours >= 4 else "Half Day"}
-        if loc_out:
-            in_loc = existing.get("location") or "Office"
-            update_fields["note"] = f"In: {in_loc} | Out: {loc_out}"
-            if not existing.get("location") or existing.get("location") == "Office":
-                update_fields["location"] = loc_out
-        row = db_update("attendance", existing["id"], update_fields)
+        row = db_update("attendance", existing["id"], {"clock_out": stamp, "work_hours": hours,
+                                                       "status": "Present" if hours >= 4 else "Half Day"})
         return jsonify({"success": True, "action": "out", "time": fmt_time(stamp), "hours": hours,
                         "attendance": enrich_attendance_row(row),
                         "message": f"Clocked out at {fmt_time(stamp)} - {hours:.1f} hours worked today"})
