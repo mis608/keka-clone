@@ -872,6 +872,48 @@ async function loadOrgChart(refresh) {
   renderOrgStats(d);
   renderOrg();
 }
+/* Departments used to be read-only here - the list came from the database and nothing could add to
+it, so a new team meant a SQL insert. These three functions are the whole feature: name, remit and
+head, with the API guarding the duplicate names and the delete. */
+function openDepartmentForm(deptId) {
+  const dep = deptId ? (APP.orgData?.departments || []).find(d => String(d.id) === String(deptId)) : null;
+  const body = `<div class="space-y-3">` +
+    fieldRow('Department name', 'dept_name', dep?.name, { required: true, placeholder: 'e.g. Customer Success' }) +
+    fieldRow('What this team owns', 'dept_desc', dep?.description,
+             { type: 'textarea', rows: 2, placeholder: 'Shown on the department card in the org chart' }) +
+    fieldRow('Department head', 'dept_head', dep?.head_id,
+             { type: 'select', options: employeeOptions('No head yet'),
+               placeholder: 'Pick a person', hint: 'Heads are who the org chart points at for escalations - you can leave this empty and assign one later.' }) +
+    (dep ? `<div class="text-[11.5px] text-[#8b8fa3]">${dep.count} person(s) currently in ${esc(dep.name)}. ` +
+           `Move people in or out from their profile under Employees → Edit.</div>`
+         : `<div class="text-[11.5px] text-[#8b8fa3]">After creating it, assign people from Employees → Edit → Department.</div>`) +
+    `</div>`;
+  openModal(dep ? `Edit ${dep.name}` : 'Add a department', body,
+            modalFootSave(`submitDepartment('${deptId || ''}')`, dep ? 'Save changes' : 'Create department'), 'max-w-lg');
+}
+async function submitDepartment(deptId) {
+  const name = ($('#dept_name').value || '').trim();
+  if (!name) return toast('Give the department a name', 'error');
+  const body = { name, description: ($('#dept_desc').value || '').trim(), head_id: $('#dept_head').value || null };
+  try {
+    const r = await api(deptId ? `/api/departments/${deptId}` : '/api/departments',
+                        { method: deptId ? 'PUT' : 'POST', body });
+    toast(r.message || (deptId ? 'Department saved' : 'Department created'), 'success');
+    closeAllModals();
+    APP.lookups = null; await loadLookups(true);
+    loadOrgChart(true);
+    if (currentModule === 'employees') loadEmployees(true);
+  } catch (e) { }
+}
+function deleteDepartment(deptId, name) {
+  confirmAction(`Delete ${name}? Move its people out first - the department cannot be deleted while anyone is assigned to it.`,
+    async () => {
+      const r = await api(`/api/departments/${deptId}`, { method: 'DELETE' });
+      toast(r.message || 'Department deleted', 'success');
+      APP.lookups = null; await loadLookups(true);
+      loadOrgChart(true);
+    }, 'Delete department');
+}
 function flattenNodes(nodes, out = []) { (nodes || []).forEach(n => { out.push(n); flattenNodes(n.children, out); }); return out; }
 function renderOrgStats(d) {
   const s = d.stats || {};
@@ -899,7 +941,7 @@ function renderOrg() {
     wrap.classList.remove('flex', 'items-start', 'justify-center');
     cont.className = 'grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 w-full';
     cont.innerHTML = (d.departments || []).map(dep => `<div class="border border-[#eef0f6] rounded-2xl p-4 bg-[#fbfbfe]">
-        <div class="flex items-start justify-between gap-2 mb-3"><div><div class="font-display font-semibold text-[14.5px]">${esc(dep.name)}</div><div class="text-[11.5px] text-[#8b8fa3]">${dep.count} people${(dep.locations || []).length ? ' · ' + esc(dep.locations.join(', ')) : ''}</div></div><span class="pill bg-[#eef0ff] text-[#584ac0]">${dep.count}</span></div>
+        <div class="flex items-start justify-between gap-2 mb-3"><div><div class="font-display font-semibold text-[14.5px]">${esc(dep.name)}</div><div class="text-[11.5px] text-[#8b8fa3]">${dep.count} people${(dep.locations || []).length ? ' · ' + esc(dep.locations.join(', ')) : ''}</div></div><div class="flex items-center gap-1 flex-shrink-0"><span class="pill bg-[#eef0ff] text-[#584ac0]">${dep.count}</span>${isAdmin() ? `<button data-admin-only onclick="openDepartmentForm('${dep.id}')" class="btn btn-ghost btn-xs !py-0.5 !px-1.5" title="Rename or change the head"><i class="far fa-pen"></i></button><button data-admin-only onclick="deleteDepartment('${dep.id}','${esc(dep.name)}')" class="btn btn-ghost btn-xs !py-0.5 !px-1.5" title="Delete this empty department"><i class="far fa-trash-can"></i></button>` : ''}</div></div>${dep.description ? `<div class="text-[11.5px] text-[#6b7085] -mt-1 mb-2">${esc(dep.description)}</div>` : ''}
         ${dep.head ? `<div class="flex items-center gap-2 p-2 rounded-xl bg-white border border-[#f1f2f8] mb-2"><span style="width:26px;height:26px;font-size:10px" class="avatar">${esc(initialsOf(dep.head.full_name))}</span><div class="min-w-0"><div class="text-[12.5px] font-medium truncate">${esc(dep.head.full_name)}</div><div class="text-[11px] text-[#8b8fa3]">Department head</div></div>${isAdmin() ? `<button onclick="openManagerFix('${dep.head.id}')" class="btn btn-ghost btn-xs !py-1 ml-auto" title="Reassign head"><i class="far fa-pen"></i></button>` : ''}</div>` : `<div class="text-[12px] text-[#b7791f] mb-2"><i class="fas fa-exclamation-circle"></i> No head assigned${isAdmin() ? ` <button class="underline" onclick="openManagerFix('','${dep.id}')">Assign one</button>` : ''}</div>`}
         <div class="space-y-1.5">${(dep.members || []).slice(0, 60).map(m => `<div class="flex items-center gap-2 text-[12.5px] py-1 border-b border-[#f4f5fa] last:border-0"><span style="width:22px;height:22px;font-size:8.5px" class="avatar">${esc(initialsOf(m.name || m.full_name))}</span><span class="truncate">${esc(m.name || m.full_name)}</span><span class="text-[11px] text-[#8b8fa3] truncate hidden lg:inline">${esc(m.designation || '')}</span><button onclick="openManagerFix('${m.id}')" class="row-actions force btn btn-ghost !py-0.5 !px-1.5 ml-auto text-[10.5px]" title="Change manager"><i class="fas fa-random"></i></button></div>`).join('') || '<div class="text-[12px] text-[#8b8fa3]">No members yet.</div>'}${dep.count > 60 ? `<div class="text-[11.5px] text-[#8b8fa3] pt-1">+ ${dep.count - 60} more</div>` : ''}</div></div>`).join('');
     return;
