@@ -2806,7 +2806,7 @@ def api_timesheet():
     return jsonify({"view": "me", "week": week_s, "week_label": payload["week_label"], "timesheet": payload,
                     "days": days, "projects": [{"id": p["id"], "name": p["name"], "code": p.get("code"),
                                                 "client": p.get("client"), "billing_rate": money(p.get("billing_rate")),
-                                                "status": p.get("status")} for p in projects],
+                                                "manager_id": p.get("manager_id"), "status": p.get("status")} for p in projects],
                     "locked": payload.get("status") in ("Approved",),
                     "can_review": is_admin(),
                     "stats": {"this_week": payload["total_hours"], "billable_week": payload["billable_hours"],
@@ -2954,66 +2954,125 @@ def api_projects():
                      "contributors": len({str(sheets.get(str(e.get("timesheet_id")), {}).get("employee_id")) for e in mine if sheets.get(str(e.get("timesheet_id")))})})
     return jsonify(rows)
 
-    return jsonify(rows)
+
+PROJECT_STATUSES = ("Active", "On Hold", "Completed", "Closed")
 
 
-# Projects are admin-managed: the weekly grid and the /api/lookups dropdown both read the
-# `projects` table, so anything created here is instantly bookable on a timesheet.
-@app.route("/api/projects", methods=["POST"])
-@admin_required
-def api_project_create():
-    data = request.get_json(silent=True) or {}
-    name = (data.get("name") or "").strip()
-    code = (data.get("code") or "").strip().upper()
+def _project_code(name):
+    """A short unique code for a project, derived from its name.
+
+    `projects.code` is `not null` and carries a unique index, so a generated code has to be checked
+    against the rows on file here instead of arriving as a Postgres constraint error.
+    """
+    words = [w for w in re.split(r"[^A-Za-z0-9]+", str(name or "")) if w]
+    one = re.sub(r"[^A-Z0-9]", "", words[0].upper())[:4] if words else "PRJ"
+    two = re.sub(r"[^A-Z0-9]", "", words[1].upper())[:5] if len(words) > 1 else ""
+    base = (f"PRJ-{one}-{two}" if two else f"PRJ-{one}")[:20].strip("-")
+    taken = {str(p.get("code") or "").strip().upper() for p in db_list("projects")}
+    if base not in taken:
+        return base
+    n = 2
+    while f"{base}-{n}"[:20].strip("-") in taken:
+        n += 1
+    return f"{base}-{n}"[:20].strip("-")
+
+
+def _clean_project(data, current=None, existing=None):
+    """Validate a project form into a write payload.
+
+    A PUT only has to carry what it touched (the "mark this Completed" action sends one key), so any
+    field left out of the body is taken from the row on file - the same rule the salary structures
+    follow, and for the same reason: a partial form must not blank anything.
+    """
+    def field(key):
+        return data.get(key) if key in data else (existing or {}).get(key)
+
+    name = str(field("name") or "").strip()
     if not name:
-        raise ApiError("A project name is required")
-    if not code:
-        raise ApiError("A project code is required")
-    if any(str(p.get("code") or "").upper() == code for p in db_list("projects")):
-        raise ApiError(f"Project code '{code}' is already in use")
-    row = {"code": code, "name": name,
-           "client": (data.get("client") or "").strip() or None,
-           "manager_id": data.get("manager_id") or None,
-           "billing_rate": money(data.get("billing_rate")) or None,
-           "status": (data.get("status") or "Active").strip()}
-    return jsonify({"success": True, "project": db_insert("projects", row)})
+        raise ApiError("A project needs a name")
+    if len(name) > 60:
+        raise ApiError("Keep the project name under 60 characters")
+    rows = db_list("projects")
+    twin = next((q for q in rows if str(q.get("name")).strip().lower() == name.lower()
+                 and str(q.get("id")) != str(current)), None)
+    if twin:
+        raise ApiError(f"A project called {name} already exists (code {twin.get('code')}) - log your hours against "
+                       "that one, or name this one differently")
+    code = re.sub(r"[^A-Z0-9-]+", "-", str(field("code") or "").strip().upper()).strip("-")[:20]
+    if code in ("", "NONE", "NULL"):
+        code = _project_code(name)
+    if len(code) < 3:
+        raise ApiError(f"Code {code or '(blank)'} is too short - three characters minimum, something like CLNT-ACME")
+    clash = next((q for q in rows if str(q.get("code") or "").strip().upper() == code.upper()
+                  and str(q.get("id")) != str(current)), None)
+    if clash:
+        raise ApiError(f"{code} is already the code for {clash.get('name')} - pick another one")
+    rate = money(field("billing_rate"))
+    if rate < 0:
+        raise ApiError("A billing rate cannot be negative - use 0 for internal work")
+    status = str(field("status") or "Active").strip()
+    if status not in PROJECT_STATUSES:
+        raise ApiError("Project status must be one of " + ", ".join(PROJECT_STATUSES))
+    payload = {"name": name, "code": code, "client": str(field("client") or "").strip()[:60] or None,
+               "billing_rate": round(rate, 2), "status": status}
+    manager = field("manager_id")
+    if manager in (None, "", "None", "All"):
+        payload["manager_id"] = (existing or {}).get("manager_id") if current else None
+    else:
+        if not db_get("employees", manager):
+            raise ApiError("The project manager has to be someone on the employee list")
+        payload["manager_id"] = str(manager)
+    return payload
+
+
+def project_mutable(project):
+    """An HR Admin, or the person the project is filed under, may change it.
+
+    Seeded projects already name a manager, so a manager fixes a typo themselves instead of raising
+    a ticket; anything with no manager at all falls back to HR.
+    """
+    if is_admin():
+        return True
+    me = acting_employee_id()
+    return bool(me) and bool(project.get("manager_id")) and str(me) == str(project.get("manager_id"))
+
+
+@app.route("/api/projects", methods=["POST"])
+def api_project_create():
+    """People open their own projects - a fixed list of five is what made the grid unusable."""
+    data = request.get_json(silent=True) or {}
+    payload = _clean_project(data)
+    me = acting_employee_id()
+    if not payload.get("manager_id") and me:
+        payload["manager_id"] = str(me)          # whoever raised it owns it until HR says otherwise
+    created = db_insert("projects", payload)
+    return jsonify({"success": True, "project": created,
+                    "message": f"{created.get('name')} is on the project list - pick it in the grid and log against it"})
 
 
 @app.route("/api/projects/<row_id>", methods=["PUT", "DELETE"])
-@admin_required
-def api_project_update(row_id):
+def api_project_row(row_id):
+    project = db_get("projects", row_id)
+    if not project:
+        raise ApiError("Project not found", 404)
+    if not project_mutable(project):
+        manager = (employee_display(project.get("manager_id")) or {}).get("full_name")
+        who = f"the project manager ({manager})" if manager else "an HR Admin"
+        raise ApiError(f"Only {who} can change {project.get('name')} - ask them, or have HR reassign the project first", 403)
     if request.method == "DELETE":
-        if any(str(e.get("project_id")) == str(row_id) for e in db_list("timesheet_entries")):
-            raise ApiError("This project has logged hours and cannot be deleted - set its status to 'Archived' instead")
+        entries = [e for e in db_list("timesheet_entries") if str(e.get("project_id")) == str(row_id)]
+        if entries:
+            hours = round(sum(money(e.get("hours")) for e in entries), 1)
+            many = "entry" if len(entries) == 1 else "entries"
+            raise ApiError(f"{project.get('name')} already has {len(entries)} logged {many} worth {hours} h - mark it "
+                           "Completed instead, so the time people claimed keeps somewhere to live")
         db_delete("projects", row_id)
-        return jsonify({"success": True})
+        return jsonify({"success": True, "message": f"{project.get('name')} is off the project list"})
     data = request.get_json(silent=True) or {}
-    fields = {}
-    if "name" in data:
-        name = (data.get("name") or "").strip()
-        if not name:
-            raise ApiError("A project name is required")
-        fields["name"] = name
-    if "code" in data:
-        code = (data.get("code") or "").strip().upper()
-        if not code:
-            raise ApiError("A project code is required")
-        if any(str(p.get("code") or "").upper() == code and str(p.get("id")) != str(row_id)
-               for p in db_list("projects")):
-            raise ApiError(f"Project code '{code}' is already in use")
-        fields["code"] = code
-    if "client" in data:
-        fields["client"] = (data.get("client") or "").strip() or None
-    if "manager_id" in data:
-        fields["manager_id"] = data.get("manager_id") or None
-    if "billing_rate" in data:
-        fields["billing_rate"] = money(data.get("billing_rate")) or None
-    if "status" in data:
-        fields["status"] = (data.get("status") or "Active").strip()
-    return jsonify({"success": True, "project": db_update("projects", row_id, fields)})
+    updated = db_update("projects", row_id, _clean_project(data, current=row_id, existing=project))
+    return jsonify({"success": True, "project": updated,
+                    "message": f"{updated.get('name')} saved - {updated.get('status')}, code {updated.get('code')}"})
 
-
-# =================================================================== payroll
 
 # =================================================================== payroll
 PAYROLL_STATUSES = ("Draft", "Published", "Paid")
