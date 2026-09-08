@@ -2954,6 +2954,66 @@ def api_projects():
                      "contributors": len({str(sheets.get(str(e.get("timesheet_id")), {}).get("employee_id")) for e in mine if sheets.get(str(e.get("timesheet_id")))})})
     return jsonify(rows)
 
+    return jsonify(rows)
+
+
+# Projects are admin-managed: the weekly grid and the /api/lookups dropdown both read the
+# `projects` table, so anything created here is instantly bookable on a timesheet.
+@app.route("/api/projects", methods=["POST"])
+@admin_required
+def api_project_create():
+    data = request.get_json(silent=True) or {}
+    name = (data.get("name") or "").strip()
+    code = (data.get("code") or "").strip().upper()
+    if not name:
+        raise ApiError("A project name is required")
+    if not code:
+        raise ApiError("A project code is required")
+    if any(str(p.get("code") or "").upper() == code for p in db_list("projects")):
+        raise ApiError(f"Project code '{code}' is already in use")
+    row = {"code": code, "name": name,
+           "client": (data.get("client") or "").strip() or None,
+           "manager_id": data.get("manager_id") or None,
+           "billing_rate": money(data.get("billing_rate")) or None,
+           "status": (data.get("status") or "Active").strip()}
+    return jsonify({"success": True, "project": db_insert("projects", row)})
+
+
+@app.route("/api/projects/<row_id>", methods=["PUT", "DELETE"])
+@admin_required
+def api_project_update(row_id):
+    if request.method == "DELETE":
+        if any(str(e.get("project_id")) == str(row_id) for e in db_list("timesheet_entries")):
+            raise ApiError("This project has logged hours and cannot be deleted - set its status to 'Archived' instead")
+        db_delete("projects", row_id)
+        return jsonify({"success": True})
+    data = request.get_json(silent=True) or {}
+    fields = {}
+    if "name" in data:
+        name = (data.get("name") or "").strip()
+        if not name:
+            raise ApiError("A project name is required")
+        fields["name"] = name
+    if "code" in data:
+        code = (data.get("code") or "").strip().upper()
+        if not code:
+            raise ApiError("A project code is required")
+        if any(str(p.get("code") or "").upper() == code and str(p.get("id")) != str(row_id)
+               for p in db_list("projects")):
+            raise ApiError(f"Project code '{code}' is already in use")
+        fields["code"] = code
+    if "client" in data:
+        fields["client"] = (data.get("client") or "").strip() or None
+    if "manager_id" in data:
+        fields["manager_id"] = data.get("manager_id") or None
+    if "billing_rate" in data:
+        fields["billing_rate"] = money(data.get("billing_rate")) or None
+    if "status" in data:
+        fields["status"] = (data.get("status") or "Active").strip()
+    return jsonify({"success": True, "project": db_update("projects", row_id, fields)})
+
+
+# =================================================================== payroll
 
 # =================================================================== payroll
 PAYROLL_STATUSES = ("Draft", "Published", "Paid")
