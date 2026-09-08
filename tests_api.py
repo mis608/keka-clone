@@ -61,7 +61,14 @@ call("POST", "/login", json_body={"email": "someone@else.com", "password": "demo
 _, body = call("POST", "/login", json_body={"email": "admin@company.com", "password": "demo123"},
                want_keys=["success"], label="admin login")
 call("GET", "/dashboard", want_keys=None, label="dashboard page renders")
-_, sess = call("GET", "/api/session", want_keys=["user.role", "is_admin"], label="session")
+_, sess = call("GET", "/api/session", want_keys=["user.role", "is_admin", "office_date", "office_time"], label="session")
+# the UI must be *told* what day it is; see the office-clock section for why a browser clock will not do
+_od = str(sess.get("office_date") or "")
+_ot = str(sess.get("office_time") or "")
+if len(_od.split("-")) != 3 or not all(x.isdigit() for x in _od.split("-")):
+    fails.append(f"/api/session must hand the browser an ISO office date, got {_od!r}")
+if len(_ot.split(":")) < 3 or not all(x.isdigit() for x in _ot.split(":")[:3]):
+    fails.append(f"/api/session office_time should read HH:MM:SS, got {_ot!r}")
 show("role", sess["is_admin"])
 call("GET", "/api/lookups", want_keys=["departments", "employees", "doc_types", "candidate_stages"], label="lookups")
 
@@ -445,11 +452,49 @@ if isinstance(perf, dict):
 
 
 print("== payroll & expenses ==")
+
+
+def _num(v):
+    try:
+        return float(v or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 call("GET", "/api/payslips", label="payslips")
 _, ps = call("GET", "/api/payslips", label="payslips list")
 if ps:
-    call("GET", f"/api/payslips/{ps[0]['id']}/detail", want_keys=["earnings", "deductions", "net", "company"], label="payslip detail")
-call("GET", "/api/payroll/summary", want_keys=["net_payroll", "per_department", "trend"], label="payroll summary")
+    # A draft is HR's working paper: it may sit in the HR list, but the slip itself stays shut until
+    # someone publishes it, or an employee reads numbers that are still moving.
+    draft = next((p for p in ps if p.get("status") == "Draft"), None)
+    if draft:
+        _, derr = call("GET", f"/api/payslips/{draft['id']}/detail", expect=(404,), label="a draft payslip cannot be opened")
+        show("draft slip says", (derr or {}).get("error"))
+    else:
+        fails.append("the seed has no Draft payslip, so unpublished slips being hidden is untested")
+    released = next((p for p in ps if p.get("status") != "Draft"), None)
+    assert released, "the demo data should have a published or paid payslip to read"
+    _, det = call("GET", f"/api/payslips/{released['id']}/detail",
+                  want_keys=["earnings", "deductions", "gross", "deductions_total", "net", "company.name",
+                             "bank.bank_name", "days.working_days", "net_in_words", "structure.name"],
+                  label="payslip detail")
+    earn = sum(_num(l["amount"]) for l in det["earnings"])
+    ded = sum(_num(l["amount"]) for l in det["deductions"])
+    assert abs(earn - _num(det["gross"])) <= 1, f"earnings lines add to {earn}, gross says {det['gross']}"
+    assert abs(ded - _num(det["deductions_total"])) <= 1, f"deduction lines add to {ded}, total says {det['deductions_total']}"
+    assert abs(_num(det["gross"]) - _num(det["deductions_total"]) - _num(det["net"])) <= 1, "gross - deductions != net"
+    assert str(det["net_in_words"]).startswith("Rupees") and det["net_in_words"].endswith("Only"), \
+        f"no amount in words on the slip: {det['net_in_words']!r}"
+    days = det["days"]
+    assert _num(days["working_days"]) > 0, "the payslip does not say how many days it covers"
+    assert abs(_num(days["payable_days"]) + _num(days["lop_days"]) - _num(days["working_days"])) <= 0.01, \
+        f"days do not reconcile: {days}"
+    show("payslip arithmetic", f"{det['structure']['name']}: {len(det['earnings'])} earning lines + "
+                              f"{len(det['deductions'])} deduction lines = net {det['net']:,.0f} "
+                              f"over {days['payable_days']:g}/{days['working_days']:g} days")
+    show("in words", det["net_in_words"][:70])
+call("GET", "/api/payroll/summary", want_keys=["net_payroll", "per_department", "trend", "draft_slips",
+                                                "monthly_gross_cost", "lop_days"], label="payroll summary")
 _, pay = call("GET", "/api/payroll/summary", label="payroll summary body")
 show("payroll", {k: pay[k] for k in ("period", "employees_paid", "net_payroll", "gross_payroll", "deductions", "monthly_ctc_cost")})
 show("trend", [t for t in pay["trend"] if t["count"]][:3])
@@ -467,6 +512,191 @@ _, iso_sum = call("GET", "/api/payroll/summary?month=2026-08",
 if isinstance(iso_sum, dict):
     assert (iso_sum.get("year"), iso_sum.get("month")) == (2026, 8), f"summary resolved {iso_sum.get('year')}-{iso_sum.get('month')}"
     show("payroll period", f"{iso_sum['period']} from month=2026-08, net {iso_sum['net_payroll']} for {iso_sum['employees_paid']} employee(s)")
+import datetime as _dt   # this section runs before the suite's own `dt` import
+
+# ------------------------------------------------------- structures: HR writes, employees read
+_, st_rows = call("GET", "/api/payroll/structures", want_keys=["0.employee"], label="structures (HR)")
+if isinstance(st_rows, list):
+    checks[0] += 1
+    broken = [r for r in st_rows if not r.get("missing") and not _num(r.get("monthly_gross"))]
+    if broken:
+        fails.append(f"{len(broken)} structure(s) reached the UI with no monthly gross")
+    else:
+        show("structures", f"{len(st_rows)} employee(s), {sum(1 for r in st_rows if r.get('missing'))} without one, "
+                           f"gross/net on every row")
+    _, one_st = call("GET", f"/api/payroll/structures?employee_id={st_rows[0]['employee_id']}",
+                     label="structures filtered to one employee")
+    assert isinstance(one_st, list) and len(one_st) == 1, f"the employee filter gave {len(one_st) if isinstance(one_st, list) else one_st} rows"
+
+pay_emp = requests.Session()
+pay_emp.post(BASE + "/login", json={"email": "aarav.sharma@company.com", "password": "demo123"}, timeout=60)
+checks[0] += 1
+_r = pay_emp.get(BASE + "/api/payroll/structures", timeout=60)
+_own = _r.json() if "json" in _r.headers.get("Content-Type", "") else _r.text[:120]
+if _r.status_code == 200 and isinstance(_own, list) and len(_own) <= 1 \
+        and all(str(o.get("employee", {}).get("email")) == "aarav.sharma@company.com" for o in _own):
+    print("  ok   an employee reads only their own salary structure")
+else:
+    fails.append(f"employee structures read -> {_r.status_code} {json.dumps(_own, default=str)[:160]}")
+_refused = []
+for method, path, payload in (("POST", "/api/payroll/structures", {"basic": 40000}),
+                              ("POST", "/api/payroll/run", {"period": "2026-08"}),
+                              ("POST", "/api/payroll/publish", {"period": "2026-08"}),
+                              ("POST", "/api/payroll/mark-paid", {"period": "2026-08"}),
+                              ("GET", "/api/payroll/register?period=2026-08", None),
+                              ("GET", "/api/payroll/register/export?period=2026-08", None)):
+    rr = pay_emp.request(method, BASE + path, json=payload, timeout=60)
+    checks[0] += 1
+    if rr.status_code != 403:
+        _refused.append(f"{method} {path} -> {rr.status_code}")
+if _refused:
+    fails.append("an Employee was not refused the HR-only payroll endpoints: " + "; ".join(_refused))
+    print("  !! FAIL employee refused payroll admin -> " + "; ".join(_refused))
+else:
+    print("  ok   running payroll, publishing, paying and the bank register are HR only")
+
+target = next((r["employee_id"] for r in st_rows if not r.get("missing")), None)
+assert target, "no employee with a structure to test against"
+call("POST", "/api/payroll/structures", json_body={"employee_id": "ghost", "basic": 40000}, expect=(400,), label="unknown employee refused")
+call("POST", "/api/payroll/structures", json_body={"employee_id": target, "name": "Upside down", "basic": 10000, "hra": 20000},
+     expect=(400,), label="HRA above basic refused")
+call("POST", "/api/payroll/structures", json_body={"employee_id": target, "name": "Nothing"}, expect=(400,), label="no earnings refused")
+call("POST", "/api/payroll/structures", json_body={"employee_id": target, "name": "All gone", "basic": 5000, "hra": 1000, "pf": 9000},
+     expect=(400,), label="deductions not below gross refused")
+_, badctc = call("POST", "/api/payroll/structures", json_body={"employee_id": target, "name": "Wrong CTC", "basic": 40000, "hra": 5000,
+                                                                "ctc": 9999999}, expect=(400,), label="a CTC the components cannot pay")
+show("ctc refusal says", (badctc or {}).get("error"))
+_, mk = call("POST", "/api/payroll/structures", json_body={"employee_id": target, "name": "Suite revision", "basic": 40000,
+             "hra": 16000, "special_allowance": 8000, "allowances": [{"label": "Internet", "amount": 1200}],
+             "pf": 4800, "esi": 0, "professional_tax": 200, "tds": 3000, "employer_pf": 4800,
+             "effective_from": str(_dt.date.today())}, want_keys=["structure.id", "message"], label="structure created")
+sid = mk["structure"]["id"]
+show("created", mk.get("message"))
+call("POST", "/api/payroll/structures", json_body={"employee_id": target, "name": "suite revision", "basic": 40000},
+     expect=(400,), label="a second structure with the same name refused")
+_, upd = call("PUT", f"/api/payroll/structures/{sid}", json_body={"basic": 44000}, want_keys=["structure"], label="partial update")
+st_after = upd["structure"]
+assert st_after["allowances"].get("Internet") == 1200, f"a PUT that only touched basic wiped the allowances: {st_after['allowances']}"
+assert st_after["name"] == "Suite revision", "a PUT that only touched basic renamed the structure"
+assert abs(_num(st_after["monthly_gross"]) - 69200) < 1, f"gross did not follow the new basic: {st_after['monthly_gross']}"
+assert abs(_num(st_after["monthly_gross"]) - _num(st_after["monthly_deductions"]) - _num(st_after["monthly_net"])) < 1, \
+    "the structure's own gross - deductions != net"
+show("partial update", f"basic 44,000 -> gross {_num(st_after['monthly_gross']):,.0f}, net {_num(st_after['monthly_net']):,.0f}, "
+                       "allowances and name kept")
+call("DELETE", f"/api/payroll/structures/{sid}", want_keys=["success"], label="structure deleted")
+checks[0] += 1
+after_del = call("GET", f"/api/payroll/structures?employee_id={target}", label="structures after delete")[1]
+assert not any(r["id"] == sid for r in after_del), "the deleted structure is still listed"
+assert len(after_del) == 1, f"expected the seeded structure back, got {len(after_del)} rows"
+
+# ------------------------------------------------------------------------- the payroll process
+_, pay0 = call("GET", "/api/payroll/summary", want_keys=["year", "month"], label="summary before the run")
+period = f"{pay0['year']:04d}-{pay0['month']:02d}"
+_, run = call("POST", "/api/payroll/run", json_body={"period": period, "overwrite": True},
+              want_keys=["created", "updated", "kept", "skipped", "net_payroll", "employees"], label="payroll run (drafts)")
+checks[0] += 1
+if _num(run["created"]) + _num(run["updated"]) < 1 or _num(run["net_payroll"]) <= 0:
+    fails.append(f"the run produced nothing usable: {run}")
+else:
+    show("payroll run", f"{run['created']} generated, {run['updated']} rebuilt, {len(run['kept'])} left alone, "
+                        f"{len(run['skipped'])} skipped - net {run['net_payroll']:,.0f} for {run['employees']}")
+assert all(isinstance(x.get("reason"), str) and x.get("employee") for x in run["skipped"]), "skips are not explained"
+_, again = call("POST", "/api/payroll/run", json_body={"period": period}, want_keys=["created", "updated"], label="a second run is idempotent")
+assert _num(again["created"]) == 0, f"the second run created {again['created']} extra payslips"
+call("POST", "/api/payroll/run", json_body={"period": f"{pay0['year']}-12"}, expect=(400,), label="a future month is refused")
+call("POST", "/api/payroll/run", json_body={"period": "september"}, expect=(400,), label="a junk period is answered in words")
+_, drafted = call("GET", f"/api/payslips?period={period}", label="the period after the run")
+assert drafted and all(p["status"] == "Draft" for p in drafted), "the run left something outside Draft"
+assert any(_num(p["lop_days"]) > 0 for p in drafted), "attendance has absences but no slip carries loss of pay"
+show("loss of pay", f"{sum(1 for p in drafted if _num(p['lop_days']) > 0)} of {len(drafted)} slips docked days, "
+                    f"{sum(_num(p['lop_days']) for p in drafted):g} LOP days total")
+_, emp_view = call("GET", f"/api/payslips?period={period}", label="employee sees nothing unreleased (admin view)")
+checks[0] += 1
+_emp_slips = pay_emp.get(BASE + f"/api/payslips?period={period}", timeout=60).json()
+if _emp_slips:
+    fails.append(f"a Draft payslip was visible to the employee: {_emp_slips}")
+else:
+    print("  ok   an employee's payslip list is empty while the period is still in Draft")
+call("POST", "/api/payroll/mark-paid", json_body={"period": period}, expect=(400,), label="cannot pay what was never published")
+_, pub = call("POST", "/api/payroll/publish", json_body={"period": period}, want_keys=["published", "message"], label="publish the period")
+assert _num(pub["published"]) == len(drafted), f"published {pub['published']} of {len(drafted)} drafts"
+checks[0] += 1
+_now = pay_emp.get(BASE + f"/api/payslips?period={period}", timeout=60).json()
+if _now and all(p["status"] == "Published" for p in _now):
+    print(f"  ok   after publishing, the employee sees {len(_now)} slip(s) with their own numbers")
+else:
+    fails.append(f"publishing did not reach the employee: {_now}")
+_, reg = call("GET", f"/api/payroll/register?period={period}", want_keys=["rows", "totals.net", "totals.employees",
+                                                                          "structures_missing", "label"], label="payroll register")
+assert abs(sum(_num(r["net_pay"]) for r in reg["rows"]) - _num(reg["totals"]["net"])) < 1, \
+    f"register rows add to {sum(_num(r['net_pay']) for r in reg['rows'])}, totals say {reg['totals']['net']}"
+assert reg["totals"]["employees"] == len(reg["rows"]), "the register's employee count disagrees with its rows"
+assert all(r.get("bank_account_no") and r.get("pan_no") for r in reg["rows"]), "the bank file has no account or PAN columns"
+show("register", f"{len(reg['rows'])} rows · net {reg['totals']['net']:,.0f} · {reg['totals']['paid']} paid, "
+                 f"{reg['totals']['published']} published, {reg['totals']['draft']} draft")
+_, paid = call("POST", "/api/payroll/mark-paid", json_body={"period": period, "paid_on": f"{period}-28"},
+               want_keys=["paid", "paid_on"], label="mark the period paid")
+_, after_pay = call("GET", f"/api/payslips?period={period}", label="the period after payment")
+assert all(p["status"] == "Paid" for p in after_pay), "some slips did not become Paid"
+assert all(p.get("paid_on_label") not in (None, "", "-") for p in after_pay), "a paid slip has no paid-on date"
+one_slip = after_pay[0]["id"]
+call("POST", f"/api/payslips/{one_slip}/revoke", json_body={}, expect=(400,), label="revoking needs a reason")
+call("POST", f"/api/payslips/{one_slip}/revoke", json_body={"reason": "Recomputed TDS after the finance review"},
+     want_keys=["message"], label="revoke a released slip")
+call("GET", f"/api/payslips/{one_slip}/detail", expect=(404,), label="the revoked slip is shut again")
+_, boosted = call("PUT", f"/api/payslips/{one_slip}", json_body={"bonus": 15000, "notes": "Festival advance, approved by finance"},
+                  want_keys=["payslip", "message"], label="add a bonus to the draft")
+checks[0] += 1
+if _num(boosted["payslip"]["net_pay"]) <= _num(after_pay[0]["net_pay"]):
+    fails.append(f"a 15,000 bonus did not raise net pay: {after_pay[0]['net_pay']} -> {boosted['payslip']['net_pay']}")
+else:
+    show("bonus applied", f"{after_pay[0]['net_pay']:,.0f} -> {boosted['payslip']['net_pay']:,.0f} with a note on the slip")
+call("PUT", f"/api/payslips/{one_slip}", json_body={"status": "Published"}, label="release it again")
+_, csv_res = call("GET", f"/api/payroll/register/export?period={period}", label="bank register CSV")
+checks[0] += 1
+_csv = s.get(BASE + f"/api/payroll/register/export?period={period}", timeout=60)
+_lines = [l for l in _csv.text.splitlines() if l.strip()]
+if "text/csv" not in _csv.headers.get("Content-Type", ""):
+    fails.append(f"the register export is not CSV: {_csv.headers.get('Content-Type')}")
+elif len(_lines) != len(reg["rows"]) + 1:
+    fails.append(f"CSV has {len(_lines) - 1} data rows for {len(reg['rows'])} register rows")
+elif not all(h in _lines[0].lower() for h in ("account no", "net pay", "ifsc")):
+    # csv_response title-cases every column, so the header reads "Account No", not "account_no"
+    fails.append(f"CSV header is missing the bank columns: {_lines[0][:120]}")
+else:
+    show("bank file", f"{len(_lines) - 1} rows · header {len(_lines[0].split(','))} columns · {len(_csv.content) / 1024:.1f} KB")
+# the two readers of a period must agree, and a released slip's money is frozen
+_, _by_period = call("GET", f"/api/payroll/summary?period={period}", label="payroll summary by ?period=")
+_, _by_month = call("GET", f"/api/payroll/summary?month={period}", label="payroll summary by ?month=")
+if _by_period.get("period") != _by_month.get("period"):
+    fails.append(f"one month answers differently by period= ({_by_period.get('period')}) than by month= ({_by_month.get('period')})")
+elif float(_by_period.get("net_payroll") or 0) != float(_by_month.get("net_payroll") or 0):
+    fails.append("?period= and ?month= disagree about the net payroll for the same month - one is not filtering")
+else:
+    show("summary filters", f"?period= and ?month= both read {_by_period.get('period')}, net {_by_period.get('net_payroll'):,.0f}")
+# read it fresh: an earlier step in this section revoked one slip and re-released it with a bonus,
+# so the snapshot taken before that would report a legal change as a refused one
+_, _now = call("GET", f"/api/payslips?period={period}", label="the period before the frozen-amount check")
+_locked = next(p2 for p2 in _now if p2.get("status") in ("Paid", "Published"))
+_bonus_before = float(_locked.get("bonus") or 0)
+_r, _b = call("PUT", f"/api/payslips/{_locked['id']}", json_body={"bonus": _bonus_before + 5000},
+              expect=(400,), label="a released slip refuses an amount change")
+_msg = str(_b.get("error") or _b.get("message") or "")
+if "revoke" not in _msg.lower():
+    fails.append(f"the refusal did not say how to proceed: {_msg[:120]!r}")
+else:
+    show("amounts frozen", _msg[:104])
+call("PUT", f"/api/payslips/{_locked['id']}", json_body={"status": "Paid", "paid_on": f"{period}-28"},
+     expect=(200,), label="but status and paid-on date stay editable")
+_, _rows_now = call("GET", f"/api/payslips?period={period}", label="the period after the refused edit")
+_here = next((x for x in _rows_now if x.get("id") == _locked["id"]), {})
+if abs(float(_here.get("bonus") or 0) - _bonus_before) > 0.5:
+    fails.append(f"the refused bonus change still moved the slip: {_bonus_before} -> {_here.get('bonus')}")
+elif str(_here.get("status") or "").lower() not in ("paid", "published"):
+    fails.append(f"the allowed status write did not stick: the row reads {_here.get('status')!r}")
+else:
+    show("refused edit", f"bonus still {_bonus_before:,.0f} and the slip is {_here['status']} on {_here.get('paid_on_label') or '-'}")
+
 call("GET", "/api/payslips?month=13", expect=(400,), label="month out of range refused")
 call("GET", "/api/payroll/summary?month=nonsense", expect=(400,), label="month junk answered with 400, not 500")
 call("GET", "/api/reimbursements", want_keys=["0.amount_label"], label="reimbursements")
@@ -855,6 +1085,15 @@ for _label, _at, _want in (("12:42 PM", (12, 42, 0), 0), ("12:42 AM", (0, 42, 0)
     if seconds_off(_label, _dt.datetime(2026, 1, 1, *_at)) > _want:
         raise AssertionError(f"seconds_off misreads {_label!r}")
 
+
+# The browser's "today" is served, never computed locally: a container on UTC is a day behind an
+# IST office after 18:30 UTC, and every date default (payslip period, correction form, report month)
+# would silently land on yesterday.
+if sess.get("office_date") != expected.strftime("%Y-%m-%d"):
+    fails.append(f"/api/session tells the browser the office date is {sess.get('office_date')!r} while the office clock "
+                 f"reads {expected.strftime('%Y-%m-%d')} - every date default in the app would be a day off")
+else:
+    show("session date", f"the browser's 'today' is the server's {sess['office_date']} at {sess.get('office_time')}")
 
 drift = seconds_off(hh["office_time"], expected)
 show("office_time vs IST now", f"{hh['office_time']} vs {expected.strftime('%H:%M:%S')} ({int(drift)}s apart)")
