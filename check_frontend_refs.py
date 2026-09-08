@@ -28,6 +28,11 @@ js_ids = ids_in(JS)
 # ids the JS creates through helpers, e.g. fieldRow('Label', 'reg_reason', ...)
 helper_label = r"(?:'[^']*'|\"[^\"]*\"|`[^`]*`)"
 js_ids |= set(re.findall(r"fieldRow\(\s*" + helper_label + r"\s*,\s*'([" + ID + r"]+)'", JS))
+# ...and through a local alias that forwards to it, e.g.
+#   const f = (label, name, opts) => fieldRow(label, name, e[name], opts)
+# Without this, every id built by such a helper looks like a dead selector (`#salary_ctc` did).
+for alias in set(re.findall(r"const\s+(\w+)\s*=\s*\([^)]*\)\s*=>\s*fieldRow\(", JS)):
+    js_ids |= set(re.findall(alias + r"\(\s*" + helper_label + r"\s*,\s*'([" + ID + r"]+)'", JS))
 js_ids |= set(re.findall(r"needValue\(\s*'([" + ID + r"]+)'", JS))
 js_ids |= set(re.findall(r"fillSelect\(\s*'#([" + ID + r"]+)'", JS))
 js_ids |= set(re.findall(r"getElementById\(\s*'([" + ID + r"]+)'", JS))
