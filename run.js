@@ -467,6 +467,153 @@ async function main() {
     }
   }
 
+  // ------------------------------------------------------------------ payroll
+  // The whole process has to be clickable, not just readable: structure form, run, publish, slip.
+  window.eval("switchModule('payroll')"); await settle();
+  if (count('#payrollStats .kpi') !== 5) fail('payroll', `${count('#payrollStats .kpi')} summary cards, expected 5`);
+  else ok('payroll', `5 cards · notice: "${text('#payNotice').replace(/^.*?notice: |"$/g, '').slice(0, 54) || text('#payNotice').slice(0, 54)}"`);
+  for (const label of ['Run payroll', 'Publish', 'Mark paid', 'Register CSV']) {
+    if (!new RegExp(label, 'i').test(text('#module-payroll'))) fail('payroll', `no ${label} control for HR`);
+  }
+  const csvLink = doc.querySelector('#payRegisterCsv');
+  if (csvLink && !/register\/export\?period=\d{4}-\d{2}/.test(csvLink.getAttribute('href') || '')) {
+    fail('payroll', `the register CSV link is "${csvLink.getAttribute('href')}" - it must carry the period being viewed`);
+  } else if (csvLink) ok('payroll', `bank register download points at ${csvLink.getAttribute('href')}`);
+
+  window.eval("setPayTab('structures')"); await wait(600);
+  const structRows = count('#payrollStructures table tbody tr');
+  if (!structRows) fail('payroll structures', 'the HR structures table rendered no rows');
+  else ok('payroll structures', `${structRows} employee row(s), ${count('#payrollStructures button')} action button(s)`);
+  if (!doc.querySelector('#payrollStructures button[onclick="openStructureForm()"]')) fail('payroll structures', 'no "New structure" button');
+  if (!doc.querySelector('#payrollStructures button[onclick^="filterStructures"]')) fail('payroll structures', 'no way to find the employees without a structure');
+
+  // the structure form: typing must move the totals strip, and a save must reach the API
+  const per = (await api('/api/payroll/summary')).body;
+  const wantPeriod = `${per.year}-${String(per.month).padStart(2, '0')}`;
+  window.eval('openStructureForm()'); await wait(700);
+  if (!doc.querySelector('#st_basic')) fail('structure form', 'the modal did not render its component fields');
+  else {
+    const rows0 = (await api('/api/payroll/structures')).body;
+    const empSel = doc.querySelector('#st_employee');
+    empSel.value = rows0.find(r => r.employee && r.employee.id).employee.id;
+    empSel.dispatchEvent(new window.Event('change', { bubbles: true }));
+    doc.querySelector('#st_name').value = 'Harness revision';
+    const basic = doc.querySelector('#st_basic');
+    basic.value = '41000'; basic.dispatchEvent(new window.Event('input', { bubbles: true }));
+    await wait(200);
+    window.eval('addAllowanceRow()'); await wait(200);
+    const aL = doc.querySelector('#st_allowances .allow-label'), aA = doc.querySelector('#st_allowances .allow-amount');
+    if (!aL || !aA) fail('structure form', 'Add line did not create an allowance row');
+    else {
+      aL.value = 'Internet'; aA.value = '1500'; aA.dispatchEvent(new window.Event('input', { bubbles: true }));
+      await wait(250);
+      const expected = 41000 + Number(doc.querySelector('#st_hra').value || 0)
+        + Number(doc.querySelector('#st_special_allowance').value || 0) + 1500;
+      const strip = text('#st_totals');
+      if (!strip.includes(expected.toLocaleString('en-IN')))
+        fail('structure form', `the totals strip does not show the ₹${expected.toLocaleString('en-IN')} the fields add up to: ${strip.slice(0, 130)}`);
+      else ok('structure form', `typing 41,000 and an allowance line moved the strip to ₹${expected.toLocaleString('en-IN')}`);
+      // the HR list shows one row per employee, so verify by name on that employee, never by row count
+      const findHarness = async () => (await api('/api/payroll/structures')).body.find(r => r.name === 'Harness revision');
+      const leftover = await findHarness();
+      if (leftover) await api('/api/payroll/structures/' + leftover.id, { method: 'DELETE' });   // a previous aborted run
+      const currentBefore = (await api('/api/payroll/structures')).body.find(r => r.employee_id === empSel.value);
+      window.eval('submitStructure("")'); await wait(1500); await settle();
+      const toastNow = () => [...doc.querySelectorAll('#toastWrap .toast')].map(t => t.textContent.trim()).join(' | ');
+      const made = await findHarness();
+      const modalOpen = /hidden/.test((doc.querySelector('#modalBackdrop') || {}).className || '') ? 'no' : 'yes';
+      if (!made) fail('structure form', `saving through the form created nothing; modal still open=${modalOpen}; toast: ${toastNow().slice(0, 140) || 'none'}`);
+      else {
+        ok('structure form', `saved: ${made.employee.full_name} now shows ₹${Number(made.monthly_gross).toLocaleString('en-IN')} gross, `
+                             + `₹${Number(made.monthly_net).toLocaleString('en-IN')} net (was ${currentBefore ? currentBefore.name : 'nothing'})`);
+        if (!doc.querySelector(`#payrollStructures button[onclick*="${made.id}"]`))
+          fail('payroll structures', 'the new row has no pen/trash action in the table');
+      }
+      await api('/api/payroll/structures/' + (made ? made.id : 'x'), { method: 'DELETE' });
+      await wait(1200); await settle();
+      const afterDel = (await api('/api/payroll/structures')).body.find(r => r.employee_id === empSel.value);
+      if (made && afterDel && afterDel.name === 'Harness revision')
+        fail('payroll structures', `deleting the newest structure left "${afterDel.name}" in force; it should fall back to the previous revision`);
+      else if (made) ok('payroll structures', `after deleting it, ${afterDel ? afterDel.name : 'the employee'} is in force again - revisions fall back`);
+    }
+  }
+
+  // run, then publish, and the table must follow
+  window.eval("setPayTab('slips')"); await wait(500);
+  window.eval('openPayrollRun()'); await wait(700);
+  if (!doc.querySelector('#run_period')) fail('payroll run', 'the run modal did not open');
+  else {
+    if (doc.querySelector('#run_period').value !== wantPeriod)
+      fail('payroll run', `period prefill is ${doc.querySelector('#run_period').value}, the office month is ${wantPeriod}`);
+    else ok('payroll run', `period prefilled to ${wantPeriod} from the server's office date`);
+    const draftedBefore = (await api(`/api/payslips?period=${wantPeriod}`)).body.filter(p => p.status === 'Draft').length;
+    window.eval('submitPayrollRun()'); await wait(2500); await settle();
+    const summary = text('#modalBody');
+    if (!/Payroll run finished/.test(text('#modalTitle') + summary)) fail('payroll run', `no run summary after clicking Run: ${summary.slice(0, 90)}`);
+    else {
+      const now = (await api(`/api/payslips?period=${wantPeriod}`)).body;
+      const drafts = now.filter(p => p.status === 'Draft').length;
+      if (drafts < draftedBefore) fail('payroll run', `the run lost slips: ${drafts} drafts now, ${draftedBefore} before`);
+      else ok('payroll run', `summary in the modal; ${drafts} draft(s) waiting (${now.length} slips in ${wantPeriod})`);
+      if (!/Generated|Updated|Skipped/i.test(summary)) fail('payroll run', 'the run summary does not break down created/updated/skipped');
+      window.eval('closeAllModals()');
+      const pub = [...doc.querySelectorAll('#module-payroll button')].find(b => /^Publish/.test(b.textContent.trim()));
+      if (!pub) fail('payroll publish', 'no Publish control in the payroll toolbar');
+      else {
+        pub.dispatchEvent(new window.MouseEvent('click', { bubbles: true })); await wait(600);
+        const go = doc.querySelector('#confirmGo');
+        if (!go) fail('payroll publish', 'publishing did not ask for confirmation');
+        else {
+          go.dispatchEvent(new window.MouseEvent('click', { bubbles: true })); await wait(2000); await settle();
+          const list = (await api(`/api/payslips?period=${wantPeriod}`)).body;
+          const left = list.filter(p => p.status === 'Draft').length;
+          if (left) fail('payroll publish', `${left} slip(s) still in Draft after publishing the period`);
+          else ok('payroll publish', `all ${list.length} slips for ${wantPeriod} released`);
+          if (!/Published|Paid/.test(text('#payslipTable'))) fail('payroll table', 'the table shows no released status pill after publishing');
+        }
+      }
+    }
+  }
+
+  // the slip itself: the numbers on screen must be the numbers the API holds
+  const firstSlip = (await api('/api/payslips')).body[0];
+  window.eval(`openPayslipDetail('${firstSlip.id}')`); await wait(1600); await settle();
+  const slipText = text('#modalBody');
+  if (!/Net pay/i.test(slipText)) fail('payslip', 'the payslip modal did not render');
+  else {
+    const d = (await api(`/api/payslips/${firstSlip.id}/detail`)).body;
+    const shown = '₹' + Math.round(d.net).toLocaleString('en-IN');
+    if (!slipText.includes(shown)) fail('payslip', `the slip does not show ${shown}, the net pay the API reports`);
+    else if (!/Rupees .{0,120}Only/.test(slipText)) fail('payslip', 'no amount in words on the slip');
+    else if (!/Working days/.test(slipText)) fail('payslip', 'no days strip (working / payable / loss of pay) on the slip');
+    else if (/Bank/.test(slipText) && /—/.test(slipText.split('Bank')[1] || '')) {
+      const bankPart = (slipText.split('Bank')[1] || '').slice(0, 40);
+      if (bankPart.includes('—') && !/[A-Z]{4}0\d/.test(bankPart)) fail('payslip', `the bank block is empty: "${bankPart.trim()}"`);
+      else ok('payslip', `net ${shown} in words, ${d.payable_days}/${d.working_days} days, bank line "${bankPart.trim().slice(0, 26)}"`);
+    } else ok('payslip', `net ${shown} matches the API · ${d.payable_days}/${d.working_days} days · ${d.earnings.length} earning and ${d.deductions.length} deduction lines`);
+    if (!/Print/.test(text('#modalFoot'))) fail('payslip', 'no print action on the slip');
+    if (!/Edit/.test(text('#modalFoot'))) fail('payslip', 'HR has no Edit action on a payslip');
+    else {
+      const editBtn = [...doc.querySelectorAll('#modalFoot button')].find(x => /^Edit/.test(x.textContent.trim()));
+      if (editBtn) {
+        editBtn.dispatchEvent(new window.MouseEvent('click', { bubbles: true })); await wait(700);
+        const bonusField = doc.querySelector('#ps_bonus');
+        const locked = /released as/.test(text('#modalBody'));
+        if (!bonusField) fail('payslip edit', 'the edit modal did not open from the slip');
+        else if (firstSlip.status !== 'Draft' && (bonusField.disabled !== true || !locked))
+          fail('payslip edit', `amounts on a ${firstSlip.status} slip are still typeable and no lock notice is shown`);
+        else if (firstSlip.status !== 'Draft')
+          ok('payslip edit', `bonus and recovery are greyed out on a ${firstSlip.status} slip, with the revoke notice in the way`);
+        else ok('payslip edit', `a draft slip opens straight to editable amounts (${count('#modalBody input, #modalBody select, #modalBody textarea')} fields)`);
+        const statusSel = doc.querySelector('#ps_status');
+        if (!statusSel) fail('payslip edit', 'the edit modal lost its status select');
+        else if (statusSel.disabled === true) fail('payslip edit', 'status should stay editable on a released slip - that is how it gets marked paid');
+        else ok('payslip edit', 'status and paid-on date stay open even when the money is locked');
+      }
+    }
+    window.eval('closeAllModals()');
+  }
+
   // reports: every report must produce KPIs, a chart and a table
   window.eval("switchModule('reports')"); await settle();
   const reportNames = [...doc.querySelectorAll('#reportPick option')].map(o => o.value).filter(Boolean);
@@ -626,6 +773,21 @@ async function main() {
     if (!mods.includes(`"${mod}"`)) fail('roles', `the server withheld '${mod}' from an Employee`);
   }
   ok('roles', `Employee modules granted: ${JSON.parse(mods).length} of ${MODULES.length}`);
+  // payroll for an Employee: their own structure is readable, the process is not theirs to run
+  empDom.window.eval("switchModule('payroll')"); await wait(1400);
+  if (/Run payroll|Mark paid/.test(edoc.querySelector('#module-payroll').textContent.replace(/\s+/g, ' '))
+      && [...edoc.querySelectorAll('#module-payroll [data-admin-only]')].some(el => el.style.display !== 'none' && !el.closest('.hidden')))
+    fail('roles', 'an Employee can still see the payroll run controls');
+  else ok('roles', 'payroll run/publish/pay controls are not visible to an Employee');
+  const empStructTab = edoc.querySelector('#payTabStructures');
+  if (!empStructTab || !/My structure/i.test(empStructTab.textContent)) fail('roles', `the structure tab should be offered to an Employee as "My structure", saw "${empStructTab && empStructTab.textContent}"`);
+  else {
+    empDom.window.eval("setPayTab('structures')"); await wait(900);
+    const card = edoc.querySelector('#payrollStructures').textContent.replace(/\s+/g, ' ');
+    if (!/Monthly earnings/.test(card) || !/Annual CTC/.test(card)) fail('roles', `the Employee structure card did not render: ${card.slice(0, 90)}`);
+    else if (/No structure in force|hr-triangle/.test(card)) fail('roles', 'the Employee was shown the HR "add a structure" table instead of their own card');
+    else ok('roles', `an Employee reads their own structure: ${card.match(/Net before attendance[^·]*/)?.[0].trim().slice(0, 46) || 'net line present'}`);
+  }
   // gating hides admin-only markup (it does not delete it), so visibility is the question
   const empDepMarked = [...edoc.querySelectorAll('#module-orgchart [data-admin-only], #module-orgchart button')]
     .filter(el => /add department|rename or change|delete this empty/i.test((el.title || '') + ' ' + (el.textContent || '')));
