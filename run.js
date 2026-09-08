@@ -467,6 +467,104 @@ async function main() {
     }
   }
 
+  // projects: the grid's list is not fixed - type a name, log against it, and both guards have to hold
+  const projSel = doc.querySelector('#tsGridWrap select');
+  if (!projSel) fail('projects', 'the grid rendered no project select at all');
+  else {
+    const newName = 'Harness ' + Date.now().toString(36).slice(-5);
+    if (![...projSel.options].some(o => o.value === '__new')) fail('projects', 'the project select offers no way to type a new name');
+    else if (!/New project/.test(text('#tsGridWrap'))) fail('projects', 'no New project button under the grid');
+    else {
+      const rowSnapshot = JSON.parse(window.eval('JSON.stringify(APP.tsRows[0])'));
+      const weekBefore = (await api(`/api/timesheet?week=${window.eval('APP.tsWeek')}`)).body;
+      const hoursOf = w => w.days.reduce((a, d) => a + (d.entries || []).reduce((b, e) => b + Number(e.hours || 0), 0), 0);
+      const totalBefore = hoursOf(weekBefore);
+      projSel.value = '__new';
+      projSel.dispatchEvent(new window.Event('change', { bubbles: true }));
+      await wait(600);
+      if (!doc.querySelector('#pj_name')) fail('projects', 'choosing "type a new name" did not open the form');
+      else {
+        doc.querySelector('#pj_name').value = newName;
+        doc.querySelector('#pj_client').value = 'Internal tooling';
+        doc.querySelector('#pj_rate').value = '1500';
+        doc.querySelector('#pjSaveGo').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+        await wait(1800); await settle();
+        const onFile = (await api('/api/projects')).body;
+        const made = onFile.find(x => x.name === newName);
+        if (!made) fail('projects', `the form never created "${newName}" - still ${onFile.length} project(s) on file`);
+        else {
+          ok('projects', `${newName} saved as ${made.code} at ₹${made.billing_rate}/h, managed by ${made.manager.full_name}`);
+          const row0 = doc.querySelector('#tsGridWrap select');
+          if (String(row0.value) !== String(made.id)) fail('projects', `the row that asked for it still points at "${row0.value}"`);
+          else ok('projects', 'and it is selected in the row that asked for it, with the typing still on screen');
+          const iso2 = window.eval('APP.tsWeek');
+          const cell = [...doc.querySelectorAll('#tsGridWrap input[data-ts]')].find(c => c.dataset.ts.startsWith('0|') && !c.value);
+          if (!cell) fail('projects', 'no empty hour cell in that row to log against the new project');
+          else {
+            cell.value = '2'; cell.dispatchEvent(new window.Event('change', { bubbles: true }));
+            await wait(300);
+            doc.querySelector('#tsSaveBtn').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+            await wait(1800); await settle();
+            const wk = (await api(`/api/timesheet?week=${iso2}`)).body;
+            const mine = wk.days.flatMap(d => d.entries || []).filter(e => String(e.project_id) === String(made.id));
+            if (!mine.length) fail('projects', 'hours logged against the new project did not save');
+            else ok('projects', `${mine.reduce((a, e) => a + Number(e.hours || 0), 0)} h saved against it from the grid`);
+            const trash = [...doc.querySelectorAll('#tsGridWrap button')].find(b => /remove/i.test(b.textContent || ''));
+            if (!trash) fail('projects', 'no edit/remove control under a project the signed-in person manages');
+            else {
+              const pen = [...doc.querySelectorAll('#tsGridWrap button')].find(b => /edit/i.test(b.textContent || ''));
+              if (!pen) fail('projects', 'no edit control to rename a project from its grid row');
+              else ok('projects', 'the row offers edit and remove because this login manages the project');
+              trash.dispatchEvent(new window.MouseEvent('click', { bubbles: true })); await wait(600);
+              const go = doc.querySelector('#confirmGo');
+              if (!go) fail('projects', 'removing a project did not ask first');
+              else {
+                go.dispatchEvent(new window.MouseEvent('click', { bubbles: true })); await wait(1600); await settle();
+                const afterTry = (await api('/api/projects')).body;
+                const still = afterTry.find(x => x.id === made.id);
+                const toasts = [...doc.querySelectorAll('#toastWrap .toast')].map(x => x.textContent).join(' ');
+                if (!still) fail('projects', 'a project with logged hours was deleted - those entries lost their project');
+                else if (!/Completed/i.test(toasts + (still.total_hours || '')))
+                  fail('projects', `the refusal did not offer the way out: "${toasts.slice(0, 90)}"`);
+                else ok('projects', `deleting it was refused: ${still.total_hours} h logged, "mark it Completed" offered instead`);
+                // put the row back exactly as it was found; with those hours off, the same remove
+                // from the Projects tab has to go through, and the week ends where it started
+                window.eval(`APP.tsRows[0] = JSON.parse(${JSON.stringify(JSON.stringify(rowSnapshot))}); renderTsGrid();`);
+                await wait(400);
+                doc.querySelector('#tsSaveBtn').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+                await wait(1800); await settle();
+                const weekAfter = (await api(`/api/timesheet?week=${iso2}`)).body;
+                const leftOnIt = weekAfter.days.flatMap(d => (d.entries || []).filter(e => String(e.project_id) === String(made.id)));
+                if (leftOnIt.length) fail('projects', `${leftOnIt.length} entr(y|ies) worth ${leftOnIt.reduce((a, e) => a + Number(e.hours || 0), 0)} h still point at the scratch project`);
+                else if (Math.abs(hoursOf(weekAfter) - totalBefore) > 0.01)
+                  fail('projects', `the week ended at ${hoursOf(weekAfter)} h instead of the ${totalBefore} h it started at`);
+                else ok('projects', 'the row was put back, the week is at its original total, and nothing is left pointing at the scratch project');
+                window.eval("setTsTab('projects')"); await wait(1400); await settle();
+                const inTab = (text('#tsProjectsTable').includes(newName));
+                if (!inTab) fail('projects', 'the Projects tab never listed the new project');
+                const rowBtns = [...doc.querySelectorAll('#tsProjectsTable button')];
+                const rm = rowBtns.find(b => b.getAttribute('onclick') && b.getAttribute('onclick').includes(made.id) && /trash/.test(b.innerHTML));
+                if (!rm) fail('projects', 'the Projects tab has no remove control for this row');
+                else {
+                  rm.dispatchEvent(new window.MouseEvent('click', { bubbles: true })); await wait(600);
+                  const go2 = doc.querySelector('#confirmGo');
+                  if (!go2) fail('projects', 'the tab remove did not ask first');
+                  else {
+                    go2.dispatchEvent(new window.MouseEvent('click', { bubbles: true })); await wait(1600); await settle();
+                    const now = (await api('/api/projects')).body;
+                    if (now.find(x => x.name === newName)) fail('projects', `still on file once empty (${now.length} projects)`);
+                    else ok('projects', `once the hours came off it, removing it from the Projects tab worked (${now.length} left)`);
+                  }
+                }
+                window.eval("setTsTab('mine')"); await wait(900); await settle();
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
   // ------------------------------------------------------------------ payroll
   // The whole process has to be clickable, not just readable: structure form, run, publish, slip.
   window.eval("switchModule('payroll')"); await settle();
