@@ -375,6 +375,90 @@ call("GET", "/api/timesheet/export", label="csv export")
 _, prj = call("GET", "/api/projects", label="projects")
 show("projects", [(p["code"], p["hours_this_week"], p["total_hours"], p["billable_value"]) for p in prj])
 
+print("== projects: the grid's vocabulary is not fixed ==")
+# A timesheet is only as good as the project names it offers, so a person can add one themselves.
+prj_emp = requests.Session()
+prj_emp.post(BASE + "/login", json={"email": "aarav.sharma@company.com", "password": "demo123"}, timeout=60)
+ME_ID = str(prj_emp.get(BASE + "/api/session", timeout=60).json().get("employee", {}).get("id") or "")
+
+
+def prj(method, path, payload=None, expect=200):
+    rr = prj_emp.request(method, BASE + path, json=payload, timeout=60)
+    checks[0] += 1
+    body = rr.json() if "json" in rr.headers.get("Content-Type", "") else rr.text[:160]
+    if rr.status_code != expect:
+        fails.append(f"employee {method} {path} -> {rr.status_code}: {json.dumps(body, default=str)[:170]}")
+    return rr, body
+
+
+_, made = prj("POST", "/api/projects", {"name": "Northwind Migration", "client": "Northwind Traders", "billing_rate": 2100})
+row = (made or {}).get("project") or {}
+if not row.get("id"):
+    fails.append(f"an Employee could not open a project: {json.dumps(made, default=str)[:170]}")
+else:
+    show("project added", f"{row['name']} · code {row['code']} · {row['status']} · ₹{row['billing_rate']:,.0f}/h · "
+                          f"manager {row['manager_id']}")
+    assert ME_ID, "the employee session has no employee id to own the project"
+    if str(row.get("manager_id")) != ME_ID:
+        fails.append(f"the person who opened the project is not its manager ({row.get('manager_id')} vs {ME_ID}) - "
+                     "they could not rename it afterwards")
+    codes = [str(p2.get("code") or "").upper() for p2 in prj_emp.get(BASE + "/api/projects", timeout=60).json()]
+    if not str(row["code"]).startswith("PRJ-") or codes.count(str(row["code"]).upper()) != 1:
+        fails.append(f"the code generated from the name is not unique/prefixed: {row['code']} in {codes}")
+    _, allp = call("GET", "/api/projects", label="projects list")
+    if not any(x.get("id") == row["id"] for x in allp):
+        fails.append("the new project is missing from /api/projects (the Projects tab)")
+    _, tsnow = call("GET", f"/api/timesheet?week={monday}", want_keys=["projects"], label="the grid's project list")
+    if not any(x.get("id") == row["id"] for x in tsnow["projects"]):
+        fails.append("the new project never reached the timesheet grid - the dropdown is still the fixed list")
+    else:
+        show("grid offers it", f"{len(tsnow['projects'])} projects selectable, including {row['name']} "
+                               f"({[x for x in tsnow['projects'] if x['id'] == row['id']][0].get('manager_id')})")
+    _, lk = call("GET", "/api/lookups", label="lookups")
+    if not any(x.get("id") == row["id"] for x in lk.get("projects") or []):
+        fails.append("/api/lookups still returns the old project list")
+    _, held = prj("PUT", f"/api/projects/{row['id']}", {"status": "On Hold"})
+    hp = (held or {}).get("project") or {}
+    if hp.get("status") != "On Hold" or hp.get("name") != row["name"] or float(hp.get("billing_rate") or 0) != 2100:
+        fails.append(f"a one-field PUT must change only that field, got {json.dumps(hp, default=str)[:170]}")
+    else:
+        show("partial update", f"{hp['name']} kept its ₹{hp['billing_rate']:,.0f}/h and client while going {hp['status']}")
+    _, grid2 = call("GET", f"/api/timesheet?week={monday}", label="a closed-ish project still shows")
+    shown = next((x for x in grid2["projects"] if x["id"] == row["id"]), {})
+    if shown.get("status") != "On Hold":
+        fails.append("the grid did not pick up the status change (the select labels rows by it)")
+    for body, why in (({"name": "northwind migration"}, "a second name differing only in case"),
+                      ({"name": "Unrelated", "code": row["code"]}, "a code already in use"),
+                      ({"name": ""}, "no name at all"),
+                      ({"name": "N" * 61}, "a 61-character name"),
+                      ({"name": "Rate Test", "billing_rate": -1}, "a negative billing rate"),
+                      ({"name": "Status Test", "status": "Zombie"}, "a status that is not one of the four"),
+                      ({"name": "Manager Test", "manager_id": "e9999"}, "a manager who is not on the roster"),
+                      ({"name": "Code Test", "code": "x"}, "a one-character code")):
+        rr, bb = prj("POST", "/api/projects", body, expect=400)
+        if not isinstance(bb, dict) or not bb.get("error"):
+            fails.append(f"{why} was not refused with a sentence: {str(bb)[:120]}")
+    show("refusals", "8 ways to write a bad project, each answered with a sentence naming the fix")
+    seeded = next((x for x in allp if x.get("total_hours") and str(x.get("id")) != str(row["id"])), None)
+    if not seeded:
+        fails.append("no seeded project has logged hours, so deleting a used project is untested")
+    else:
+        rr, bb = prj("PUT", f"/api/projects/{seeded['id']}", {"name": "Hijacked Project"}, expect=403)
+        if "manager" not in str((bb or {}).get("error", "")).lower():
+            fails.append(f"a stranger was refused without being told who can help: {str(bb)[:140]}")
+        else:
+            show("someone else's", str(bb["error"])[:100])
+        _, busy = call("DELETE", f"/api/projects/{seeded['id']}", expect=(400,), label="a project with logged hours cannot be deleted")
+        show("delete guarded", str((busy or {}).get("error"))[:100])
+        if "Completed" not in str((busy or {}).get("error", "")):
+            fails.append("the delete refusal did not offer the alternative that keeps the hours: " + str(busy)[:140])
+    _, gone = prj("DELETE", f"/api/projects/{row['id']}")
+    _, after = call("GET", "/api/projects", label="projects after the delete")
+    if any(x.get("id") == row["id"] for x in after):
+        fails.append("the project the Employee created survived its own delete (they may delete what they own)")
+    else:
+        show("cleaned up", f"{len(allp)} -> {len(after)} projects; {row['name']} was theirs to remove")
+
 print("== org: departments, schema check and error envelopes ==")
 _, depts = call("GET", "/api/departments", label="departments list")
 made = None
