@@ -1837,13 +1837,64 @@ async function loadTsHistory() {
     box.innerHTML = `<table class="kt"><thead><tr><th>Week</th><th>Entries</th><th>Total</th><th>Billable</th><th>Utilisation</th><th>Submitted</th><th>Approved by</th><th>Status</th></tr></thead><tbody>${rows.map(t => `<tr><td class="num font-medium">${esc(t.week_label || t.week_starting)}</td><td class="num">${t.entry_count}</td><td class="num">${num(t.total_hours)} h</td><td class="num">${num(t.billable_hours)} h</td><td class="num">${t.utilization_pct}%</td><td class="num text-[12px]">${t.submitted_at ? fmtDate(t.submitted_at) : '—'}</td><td class="text-[12.5px]">${esc(t.reviewer?.full_name || '—')}</td><td>${statusPill(t.status)}</td></tr>`).join('')}</tbody></table>`;
   } catch (e) { box.innerHTML = emptyState('Could not load history'); }
 }
+let tsProjectsCache = [];
 async function loadTsProjects() {
   const box = $('#tsProjectsTable');
   box.innerHTML = '<div class="spin"></div>';
   try {
     const rows = await api('/api/projects');
-    box.innerHTML = `<table class="kt"><thead><tr><th>Project</th><th>Client</th><th>Manager</th><th>Team</th><th>Rate</th><th>This week</th><th>All time</th><th>Billable value</th><th>Status</th></tr></thead><tbody>${rows.map(p => `<tr><td><div class="font-medium">${esc(p.name)}</div><div class="text-[11px] text-[#8b8fa3] num">${esc(p.code)}</div></td><td>${esc(p.client || 'Internal')}</td><td class="text-[12.5px]">${esc(p.manager?.full_name || '—')}</td><td class="text-[12.5px]">${(p.team || []).map(esc).join(', ') || '<span class="text-[#8b8fa3]">none yet</span>'}</td><td class="num">${p.billing_rate ? inr(p.billing_rate) + '/h' : '—'}</td><td class="num">${num(p.hours_this_week)} h</td><td class="num">${num(p.total_hours)} h</td><td class="num">${p.billable_value ? compactInr(p.billable_value) : '—'}</td><td>${statusPill(p.status)}</td></tr>`).join('')}</tbody></table>`;
+    tsProjectsCache = rows;
+    const admin = isAdmin();
+    const head = `<tr><th>Project</th><th>Client</th><th>Manager</th><th>Team</th><th>Rate</th><th>This week</th><th>All time</th><th>Billable value</th><th>Status</th>${admin ? '<th></th>' : ''}</tr>`;
+    const body = rows.map(p => `<tr><td><div class="font-medium">${esc(p.name)}</div><div class="text-[11px] text-[#8b8fa3] num">${esc(p.code)}</div></td><td>${esc(p.client || 'Internal')}</td><td class="text-[12.5px]">${esc(p.manager?.full_name || '—')}</td><td class="text-[12.5px]">${(p.team || []).map(esc).join(', ') || '<span class="text-[#8b8fa3]">none yet</span>'}</td><td class="num">${p.billing_rate ? inr(p.billing_rate) + '/h' : '—'}</td><td class="num">${num(p.hours_this_week)} h</td><td class="num">${num(p.total_hours)} h</td><td class="num">${p.billable_value ? compactInr(p.billable_value) : '—'}</td><td>${statusPill(p.status)}</td>${admin ? `<td style="white-space:nowrap"><button class="btn btn-ghost btn-xs" onclick="openProjectModal('${esc(p.id)}')" title="Edit project"><i class="fas fa-pen text-[11px]"></i></button> <button class="btn btn-ghost btn-xs" onclick="deleteProject('${esc(p.id)}')" title="Delete project"><i class="far fa-trash-alt text-[11px]"></i></button></td>` : ''}</tr>`).join('');
+    box.innerHTML = `${admin ? `<div class="flex items-center justify-between mb-3"><p class="text-[12.5px] text-[#8b8fa3]">Projects employees can book hours against in the weekly grid.</p><button onclick="openProjectModal()" class="btn btn-primary btn-xs"><i class="fas fa-plus"></i> New project</button></div>` : ''}<table class="kt"><thead>${head}</thead><tbody>${body}</tbody></table>`;
   } catch (e) { box.innerHTML = emptyState('Could not load projects'); }
+}
+function openProjectModal(id) {
+  if (!isAdmin()) { toast('Only HR Admins can manage projects', 'warn'); return; }
+  const p = tsProjectsCache.find(x => String(x.id) === String(id)) || null;
+  const isEdit = !!p;
+  openModal(isEdit ? 'Edit project' : 'New project',
+    grid('md:grid-cols-2', [
+      fieldRow('Project name', 'prj_name', p?.name || '', { required: true, placeholder: 'e.g. Mobile App Revamp' }),
+      fieldRow('Code', 'prj_code', p?.code || '', { required: true, placeholder: 'e.g. MOB-01', hint: 'Short unique code shown on timesheets' }),
+      fieldRow('Client', 'prj_client', p?.client || '', { placeholder: 'Leave blank for internal work' }),
+      fieldRow('Manager', 'prj_manager', p?.manager_id || '', { type: 'select', options: employeeOptions('No manager') }),
+      fieldRow('Billing rate (₹ per hour)', 'prj_rate', p?.billing_rate ?? '', { type: 'number', step: '0.5', min: 0 }),
+      fieldRow('Status', 'prj_status', p?.status || 'Active', { type: 'select', options: ['Active', 'On Hold', 'Completed', 'Archived'] }),
+    ].join('')),
+    modalFootSave(`saveProject(${isEdit ? `'${esc(p.id)}'` : ''})`, isEdit ? 'Save changes' : 'Create project'));
+}
+async function saveProject(id) {
+  const body = {
+    name: needValue('prj_name', 'Project name is required'),
+    code: needValue('prj_code', 'Project code is required'),
+    client: ($('#prj_client')?.value || '').trim(),
+    manager_id: $('#prj_manager')?.value || null,
+    billing_rate: $('#prj_rate')?.value || null,
+    status: $('#prj_status')?.value || 'Active',
+  };
+  if (id) await api('/api/projects/' + id, { method: 'PUT', body });
+  else await api('/api/projects', { method: 'POST', body });
+  toast(id ? 'Project updated' : 'Project added — it is now selectable in the weekly grid', 'success');
+  closeAllModals();
+  await loadLookups(true);
+  // The open weekly grid keeps its own copy of the project list - refresh it in place so the
+  // new project is bookable without losing any hours already typed into APP.tsRows.
+  if (APP.ts) { APP.ts.projects = (APP.lookups || {}).projects || APP.ts.projects; renderTsGrid(); }
+  loadTsProjects();
+}
+function deleteProject(id) {
+  if (!isAdmin()) { toast('Only HR Admins can manage projects', 'warn'); return; }
+  const p = tsProjectsCache.find(x => String(x.id) === String(id));
+  confirmAction(`Delete project “${p?.name || 'this project'}”? Projects with logged hours cannot be deleted — archive them instead.`,
+    async () => {
+      await api('/api/projects/' + id, { method: 'DELETE' });
+      toast('Project deleted', 'success');
+      await loadLookups(true);
+      if (APP.ts) { APP.ts.projects = (APP.lookups || {}).projects || APP.ts.projects; renderTsGrid(); }
+      loadTsProjects();
+    }, 'Delete');
 }
 
 /* ================================================================== PAYROLL */
