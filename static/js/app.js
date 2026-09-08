@@ -44,7 +44,12 @@ function fmtDate(value, opts = { day: '2-digit', month: 'short', year: 'numeric'
   return d.toLocaleDateString('en-IN', opts);
 }
 function fmtDayShort(value) { return fmtDate(value, { day: '2-digit', month: 'short' }); }
-function todayIso() { const d = new Date(); return new Date(d.getTime() - d.getMonth() * 0).toISOString().slice(0, 10); }
+function todayIso() {
+  // The server's office date, not the browser's: a UTC web dyno and an IST office are on different
+  // calendar days after 18:30 UTC, and every date default in this UI (payroll period, document
+  // validity, an attendance correction) has to be the day the office is running.
+  return APP.officeDate || new Date().toISOString().slice(0, 10);
+}
 function isoDay(d) { return d.toISOString().slice(0, 10); }
 function initialsOf(name) { return String(name || '?').split(/\s+/).filter(Boolean).slice(0, 2).map(p => p[0]).join('').toUpperCase(); }
 function debounce(fn, ms = 280) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
@@ -59,7 +64,7 @@ function humanSize(bytes) {
 function statusPill(status) {
   const map = {
     Active: 'bg-[#e6f9f0] text-[#0f9d58]', Approved: 'bg-[#e6f9f0] text-[#0f9d58]', Verified: 'bg-[#e6f9f0] text-[#0f9d58]', Paid: 'bg-[#e6f9f0] text-[#0f9d58]', Present: 'bg-[#e6f9f0] text-[#0f9d58]', Hired: 'bg-[#e6f9f0] text-[#0f9d58]', Achieved: 'bg-[#e6f9f0] text-[#0f9d58]', Completed: 'bg-[#e6f9f0] text-[#0f9d58]', Fulfilled: 'bg-[#e6f9f0] text-[#0f9d58]', Valid: 'bg-[#e6f9f0] text-[#0f9d58]', 'On Track': 'bg-[#e6f9f0] text-[#0f9d58]', Open: 'bg-[#e6f9f0] text-[#0f9d58]',
-    Pending: 'bg-[#fff4e6] text-[#b7791f]', Submitted: 'bg-[#fff4e6] text-[#b7791f]', 'Manager Review Pending': 'bg-[#fff4e6] text-[#b7791f]', 'Self Review Pending': 'bg-[#fff4e6] text-[#b7791f]', Requested: 'bg-[#fff4e6] text-[#b7791f]', 'Notice Period': 'bg-[#fff4e6] text-[#b7791f]', 'At Risk': 'bg-[#fff4e6] text-[#b7791f]', 'Expiring soon': 'bg-[#fff4e6] text-[#b7791f]', 'On Hold': 'bg-[#fff4e6] text-[#b7791f]', 'Work From Home': 'bg-[#eef0ff] text-[#584ac0]', Screening: 'bg-[#eef0ff] text-[#584ac0]', Interview: 'bg-[#eef0ff] text-[#584ac0]', Draft: 'bg-[#f6f7fb] text-[#6b7085]', Scheduled: 'bg-[#eef0ff] text-[#584ac0]', Offer: 'bg-[#f3e8ff] text-[#7e22ce]', Applied: 'bg-[#f6f7fb] text-[#6b7085]', InProgress: 'bg-[#eef0ff] text-[#584ac0]', 'In progress': 'bg-[#eef0ff] text-[#584ac0]', 'Half Day': 'bg-[#fff4e6] text-[#b7791f]', 'On Leave': 'bg-[#eef0ff] text-[#584ac0]', 'Not Started': 'bg-[#f6f7fb] text-[#6b7085]', None: 'bg-[#f6f7fb] text-[#8b8fa3]', 'No expiry': 'bg-[#f6f7fb] text-[#8b8fa3]', 'In Review': 'bg-[#eef0ff] text-[#584ac0]'
+    Pending: 'bg-[#fff4e6] text-[#b7791f]', Submitted: 'bg-[#fff4e6] text-[#b7791f]', 'Manager Review Pending': 'bg-[#fff4e6] text-[#b7791f]', 'Self Review Pending': 'bg-[#fff4e6] text-[#b7791f]', Requested: 'bg-[#fff4e6] text-[#b7791f]', 'Notice Period': 'bg-[#fff4e6] text-[#b7791f]', 'At Risk': 'bg-[#fff4e6] text-[#b7791f]', 'Expiring soon': 'bg-[#fff4e6] text-[#b7791f]', 'On Hold': 'bg-[#fff4e6] text-[#b7791f]', Published: 'bg-[#e6f9f0] text-[#0f9d58]', 'Work From Home': 'bg-[#eef0ff] text-[#584ac0]', Screening: 'bg-[#eef0ff] text-[#584ac0]', Interview: 'bg-[#eef0ff] text-[#584ac0]', Draft: 'bg-[#f6f7fb] text-[#6b7085]', Scheduled: 'bg-[#eef0ff] text-[#584ac0]', Offer: 'bg-[#f3e8ff] text-[#7e22ce]', Applied: 'bg-[#f6f7fb] text-[#6b7085]', InProgress: 'bg-[#eef0ff] text-[#584ac0]', 'In progress': 'bg-[#eef0ff] text-[#584ac0]', 'Half Day': 'bg-[#fff4e6] text-[#b7791f]', 'On Leave': 'bg-[#eef0ff] text-[#584ac0]', 'Not Started': 'bg-[#f6f7fb] text-[#6b7085]', None: 'bg-[#f6f7fb] text-[#8b8fa3]', 'No expiry': 'bg-[#f6f7fb] text-[#8b8fa3]', 'In Review': 'bg-[#eef0ff] text-[#584ac0]'
   };
   const cls = map[status] || 'bg-[#f6f7fb] text-[#6b7085]';
   if (!status) return `<span class="pill ${cls}">—</span>`;
@@ -161,7 +166,7 @@ function fieldRow(label, name, value, opts = {}) {
       : `<option value="${esc(o.value)}" ${String(o.value) === String(value ?? '') ? 'selected' : ''}>${esc(o.label)}</option>`).join('');
     input = `<select id="${name}" class="${cls}" ${opts.disabled ? 'disabled' : ''} ${opts.onchange ? `onchange="${opts.onchange}"` : ''}>${opts.placeholder ? `<option value="">${esc(opts.placeholder)}</option>` : ''}${options}</select>`;
   } else if (opts.type === 'textarea') {
-    input = `<textarea id="${name}" rows="${opts.rows || 3}" class="${cls}" placeholder="${esc(opts.placeholder || '')}" ${opts.required ? 'required' : ''} ${opts.minlength ? `minlength="${opts.minlength}"` : ''}>${esc(value || '')}</textarea>`;
+    input = `<textarea id="${name}" rows="${opts.rows || 3}" class="${cls}" placeholder="${esc(opts.placeholder || '')}" ${opts.required ? 'required' : ''} ${opts.minlength ? `minlength="${opts.minlength}"` : ''} ${opts.disabled ? 'disabled' : ''}>${esc(value || '')}</textarea>`;
   } else if (opts.type === 'checkbox') {
     return `<label class="flex items-center gap-2 text-[13px] cursor-pointer"><input type="checkbox" id="${name}" ${value ? 'checked' : ''} class="rounded border-[#d5d8e8] text-[#584ac0]"><span>${esc(label)}${opts.hint ? ` <span class="text-[11.5px] text-[#8b8fa3]">${opts.hint}</span>` : ''}</span></label>`;
   } else {
@@ -354,7 +359,7 @@ async function bootApp() {
   const saved = localStorage.getItem('ekkaa.module');
   switchModule(saved && document.getElementById('module-' + saved) ? saved : 'home');
   const sess = await apiQuiet('/api/session');
-  if (sess) { APP.session = sess; APP.user.employee_id = sess.employee?.id || APP.user.employee_id; APP.user.role = sess.is_admin ? 'HR Admin' : 'Employee'; applyRoleGating(); }
+  if (sess) { APP.session = sess; APP.officeDate = sess.office_date || APP.officeDate; APP.user.employee_id = sess.employee?.id || APP.user.employee_id; APP.user.role = sess.is_admin ? 'HR Admin' : 'Employee'; applyRoleGating(); }
 }
 
 async function runGlobalSearch(q) {
@@ -1842,66 +1847,449 @@ async function loadTsProjects() {
 }
 
 /* ================================================================== PAYROLL */
-async function loadPayroll(refresh) {
+/* ================================================================== PAYROLL */
+const PAY_EARN = [['basic', 'Basic'], ['hra', 'HRA'], ['special_allowance', 'Special Allowance']];
+const PAY_DEDUCT = [['pf', 'Provident Fund'], ['esi', 'ESI'], ['professional_tax', 'Professional Tax'],
+                    ['tds', 'TDS / Income Tax']];
+APP.payStructures = [];
+
+function payPeriod() {
+  const now = new Date((APP.todayIso || todayIso()) + 'T12:00:00');
+  const m = $('#payMonth') ? (+$('#payMonth').value || (now.getMonth() + 1)) : (now.getMonth() + 1);
+  const y = $('#payYear') ? (+$('#payYear').value || now.getFullYear()) : now.getFullYear();
+  return { month: m, year: y, iso: `${y}-${String(m).padStart(2, '0')}`,
+           label: now.toLocaleString('en', { month: 'long' }) && `${new Date(y, m - 1, 1).toLocaleString('en', { month: 'long' })} ${y}` };
+}
+
+function payQuery() {
+  const p = payPeriod();
+  const q = new URLSearchParams({ month: p.month, year: p.year });
+  const sel = $('#payEmployee');
+  if (isAdmin() && sel && sel.value) q.set('employee_id', sel.value);
+  return q.toString();
+}
+
+async function loadPayroll() {
   await loadLookups();
-  const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-  if (!$('#payMonth').options.length) {
-    $('#payMonth').innerHTML = months.map((m, i) => `<option value="${i + 1}" ${i + 1 === new Date().getMonth() + 1 ? 'selected' : ''}>${m}</option>`).join('');
-    $('#payYear').innerHTML = [0, 1, 2].map(o => `<option value="${new Date().getFullYear() - o}">${new Date().getFullYear() - o}</option>`).join('');
+  const per = payPeriod();
+  if ($('#payMonth') && !$('#payMonth').options.length) {
+    const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+    const now = new Date((APP.todayIso || todayIso()) + 'T12:00:00');
+    $('#payMonth').innerHTML = months.map((m, i) => `<option value="${i + 1}" ${i + 1 === now.getMonth() + 1 ? 'selected' : ''}>${m}</option>`).join('');
+    $('#payYear').innerHTML = [0, 1, 2].map(o => `<option value="${now.getFullYear() - o}">${now.getFullYear() - o}</option>`).join('');
   }
-  const p = new URLSearchParams({ month: $('#payMonth').value, year: $('#payYear').value });
   if (isAdmin()) {
     $('#payEmployee').classList.remove('hidden');
     fillSelect('#payEmployee', employeeOptions('All employees'), $('#payEmployee').value, false);
-    if ($('#payEmployee').value) p.set('employee_id', $('#payEmployee').value);
   } else $('#payEmployee').classList.add('hidden');
-  let slips = [], summary = null;
-  try { [slips, summary] = await Promise.all([api('/api/payslips?' + p.toString()), api('/api/payroll/summary?' + p.toString())]); } catch (e) { return; }
-  APP.paySlips = slips; APP.paySummary = summary;
+  const q = payQuery();
+  let slips = [], summary = null, structures = [];
+  try {
+    [slips, summary, structures] = await Promise.all([
+      api('/api/payslips?' + q), api('/api/payroll/summary?' + q),
+      api('/api/payroll/structures' + (isAdmin() && $('#payEmployee').value && !$('#payEmployee').classList.contains('hidden') ? '?employee_id=' + $('#payEmployee').value : ''))]);
+  } catch (e) { return; }
+  APP.paySlips = slips; APP.paySummary = summary; APP.payStructures = structures || [];
+  const mine = !isAdmin();
+
   if (summary) {
-    $('#payrollStats').innerHTML = [
+    const me = summary.my_structure || {};
+    $('#payrollStats').innerHTML = mine ? [
+      kpiCard('Net pay this period', summary.net_payroll ? compactInr(summary.net_payroll) : '—',
+              `${summary.employees_paid || 0} payslip(s) you can open · ${esc(summary.period)}`, { tone: 'brand' }),
+      kpiCard('Gross', compactInr(summary.gross_payroll), 'before deductions'),
+      kpiCard('Deductions', compactInr(summary.deductions), `${summary.lop_days || 0} LOP day(s) this month`),
+      kpiCard('Monthly net', me.monthly_net ? compactInr(me.monthly_net) : '—',
+              me.name ? `on “${esc(me.name)}”, from ${esc(me.effective_from_label)}` : 'no structure on file'),
+      kpiCard('Annual CTC', me.ctc ? compactInr(me.ctc) : '—', 'total cost to the company'),
+    ].join('') : [
       kpiCard('Net payroll', compactInr(summary.net_payroll), `${summary.employees_paid} payslips · ${esc(summary.period)}`, { tone: 'brand' }),
       kpiCard('Gross', compactInr(summary.gross_payroll), 'before deductions'),
-      kpiCard('Deductions', compactInr(summary.deductions), 'PF, ESI, TDS, PT'),
+      kpiCard('Deductions', compactInr(summary.deductions), `${summary.lop_days || 0} LOP day(s) · bonus ${inr(summary.bonus_paid || 0)}`),
       kpiCard('Average net', summary.average_net ? compactInr(summary.average_net) : '—', 'per employee'),
-      kpiCard('Monthly CTC cost', compactInr(summary.monthly_ctc_cost), `${summary.pending_slips || 0} slips not marked paid`),
+      kpiCard('Monthly CTC cost', compactInr(summary.monthly_ctc_cost),
+              `${summary.draft_slips || 0} draft · ${summary.published_slips || 0} published · ${summary.paid_slips || 0} paid`),
     ].join('');
   }
+  renderPayNotice(summary, slips);
+  renderPayslipTable(slips);
+  renderPayStructures();
+  const csv = $('#payRegisterCsv');
+  if (csv) csv.href = '/api/payroll/register/export?period=' + encodeURIComponent(per.iso);
+  const tabLabel = $('#payTabStructures');
+  if (tabLabel) tabLabel.textContent = mine ? 'My structure' : 'Structures';
+}
+
+function renderPayNotice(summary, slips) {
+  const box = $('#payNotice');
+  if (!box) return;
+  if (!summary) { box.innerHTML = ''; return; }
+  if (isAdmin()) {
+    const draft = summary.draft_slips || 0, missing = summary.structures_missing || [];
+    const bits = [];
+    bits.push(draft
+      ? `<b>${draft}</b> draft payslip(s) for ${esc(summary.period)} - employees cannot open a slip until you publish it`
+      : (slips.length ? `Every slip for ${esc(summary.period)} has been released` : `Nothing generated for ${esc(summary.period)} yet`));
+    if (missing.length) bits.push(`<b>${missing.length}</b> active employee(s) still have no salary structure (${missing.slice(0, 3).map(m => esc(m && m.full_name || m)).join(', ')}${missing.length > 3 ? ', …' : ''})`);
+    box.innerHTML = `<div class="flex flex-wrap items-center gap-3 text-[12.5px] bg-[#eef0ff] text-[#4a3db0] rounded-xl px-3.5 py-2.5">
+      <i class="fas fa-circle-info"></i><span class="flex-1">${bits.join(' · ')}</span>
+      ${draft ? `<button onclick="publishPayroll()" class="btn btn-primary btn-xs"><i class="fas fa-paper-plane"></i> Publish ${draft}</button>` : ''}
+      ${missing.length ? `<button onclick="setPayTab('structures');filterStructures('missing')" class="btn btn-ghost btn-xs">Fix that</button>` : ''}
+    </div>`;
+    return;
+  }
+  const latest = (slips || [])[0];
+  const me = summary.my_structure || {};
+  const bits = [latest
+    ? `Your ${esc(latest.period_label)} slip is <b>${esc(latest.status)}</b> · net ${inr(latest.net_pay)}`
+    : `No payslip for ${esc(summary.period)} yet - HR releases them after the month closes`];
+  if (me.monthly_gross) bits.push(`structure “${esc(me.name)}” pays ${inr(me.monthly_net)} a month net`);
+  else bits.push('you have no salary structure on file - ask HR');
+  box.innerHTML = `<div class="flex items-center gap-3 text-[12.5px] bg-[#f6f7fb] text-[#6b7085] rounded-xl px-3.5 py-2.5"><i class="fas fa-info-circle"></i><span class="flex-1">${bits.join(' · ')}</span></div>`;
+}
+
+function renderPayslipTable(slips) {
   const tb = $('#payslipTable');
-  if (!slips.length) { tb.innerHTML = `<tr><td colspan="8">${emptyState('No payslips for this month', 'Pick another month or year.')}</td></tr>`; return; }
-  tb.innerHTML = slips.map((s, i) => `<tr class="clickable" onclick="openPayslipDetail('${s.id}')">
-    <td class="num font-medium">${esc(s.period_label)}</td>${isAdmin() ? `<td>${personLine(s.employee, s.employee?.department, 28)}</td>` : ''}
-    <td class="num">${inr(s.gross_earnings)}</td><td class="num text-[#c0392b]">${inr(s.total_deductions)}</td><td class="num font-semibold">${inr(s.net_pay)}</td>
-    <td>${statusPill(s.status)}</td><td class="num text-[12.5px]">${esc(s.paid_on_label || '—')}</td>
-    <td class="text-right"><div class="row-actions force"><button class="btn btn-ghost btn-xs !py-1"><i class="far fa-eye"></i> Payslip</button></div></td></tr>`).join('');
-  const st = APP.paySummary?.structures;
-  $('#payrollStructures').innerHTML = (await apiQuiet('/api/payroll/structures') || []).length ? await renderStructures() : '';
+  if (!tb) return;
+  const cols = isAdmin() ? 9 : 8;
+  if (!slips || !slips.length) {
+    tb.innerHTML = `<tr><td colspan="${cols}">${emptyState('No payslips for this month',
+      isAdmin() ? 'Pick another month, or run payroll for this one.' : 'HR publishes a slip once the month is processed.')}</td></tr>`;
+    return;
+  }
+  tb.innerHTML = slips.map(s => {
+    const draft = s.status === 'Draft';
+    const actions = isAdmin()
+      ? `<div class="row-actions force"><button class="btn btn-ghost btn-xs !py-1" title="Edit" onclick="event.stopPropagation();openPayslipEdit('${s.id}')"><i class="fas fa-pen"></i></button>
+         ${draft ? `<button class="btn btn-ghost btn-xs !py-1" title="Publish" onclick="event.stopPropagation();publishPayroll('${s.id}')"><i class="fas fa-paper-plane"></i></button>`
+                 : `<button class="btn btn-ghost btn-xs !py-1" title="Revoke" onclick="event.stopPropagation();revokePayslip('${s.id}')"><i class="fas fa-rotate-left"></i></button>`}
+         <button class="btn btn-ghost btn-xs !py-1" onclick="event.stopPropagation();openPayslipDetail('${s.id}')"><i class="far fa-eye"></i></button></div>`
+      : `<div class="row-actions force"><button class="btn btn-ghost btn-xs !py-1"><i class="far fa-eye"></i> Payslip</button></div>`;
+    return `<tr class="clickable ${draft ? 'opacity-60' : ''}" onclick="openPayslipDetail('${s.id}')">
+      <td class="num font-medium">${esc(s.period_label)}</td>${isAdmin() ? `<td>${personLine(s.employee, s.employee?.department, 28)}</td>` : ''}
+      <td class="num">${inr(s.gross_earnings)}</td><td class="num text-[#c0392b]">${inr(s.total_deductions)}</td><td class="num font-semibold">${inr(s.net_pay)}</td>
+      <td class="text-[12px] text-[#6b7085] num">${esc(s.days_label || '—')}</td>
+      <td>${statusPill(s.status)}</td><td class="num text-[12.5px]">${esc(s.paid_on_label || '—')}</td>
+      <td class="text-right">${actions}</td></tr>`;
+  }).join('');
 }
-async function renderStructures() {
-  const rows = await api('/api/payroll/structures');
-  if (!rows.length) return emptyState('No payroll structures');
-  return `<table class="kt"><thead><tr><th>Employee</th><th>Department</th><th>Basic</th><th>HRA</th><th>Special</th><th>PF</th><th>ESI</th><th>PT</th><th>TDS</th><th>Monthly</th><th>CTC</th></tr></thead><tbody>${rows.map(s => `<tr><td>${personLine(s.employee, s.employee?.designation, 26)}</td><td class="text-[12.5px]">${esc(s.department || '—')}</td><td class="num">${inr(s.basic)}</td><td class="num">${inr(s.hra)}</td><td class="num">${inr(s.special_allowance)}</td><td class="num">${inr(s.pf)}</td><td class="num">${inr(s.esi)}</td><td class="num">${inr(s.professional_tax)}</td><td class="num">${inr(s.tds)}</td><td class="num font-medium">${inr(s.monthly)}</td><td class="num">${inr(s.ctc)}</td></tr>`).join('')}</tbody></table>`;
+
+/* ---------------------------------------------------------------- structures */
+function renderPayStructures() {
+  const host = $('#payrollStructures');
+  if (!host) return;
+  const rows = APP.payStructures || [];
+  if (!isAdmin()) {
+    host.innerHTML = rows.length ? myStructureCard(rows[0])
+      : emptyState('No salary structure on file', 'HR sets your components once they create your payroll record.');
+    return;
+  }
+  const only = APP.payStructFilter === 'missing';
+  const shown = only ? rows.filter(r => r.missing) : rows;
+  const line = (items, total, tone) => `<table class="w-full">${(items || []).map(r => `<tr><td class="py-1 text-[12px]">${esc(r.label)}</td><td class="py-1 text-right num text-[12px]">${inr(r.amount)}</td></tr>`).join('')}
+      <tr class="border-t border-[#eef0f6]"><td class="pt-1.5 text-[12px] font-semibold">${esc(total[0])}</td><td class="pt-1.5 text-right num text-[12px] font-semibold ${tone}">${inr(total[1])}</td></tr></table>`;
+  const body = shown.map(s => {
+    const emp = s.employee || {};
+    if (s.missing) {
+      return `<tr><td>${personLine(emp, emp.designation, 30)}</td>
+        <td colspan="6" class="text-[12.5px] text-[#b7791f]"><i class="fas fa-triangle-exclamation mr-1"></i>No structure in force - payroll will skip ${esc(emp.full_name || 'this employee')} until one is added</td>
+        <td class="text-right"><button class="btn btn-primary btn-xs !py-1" onclick="openStructureForm(null, '${esc(s.employee_id || emp.id || '')}')"><i class="fas fa-plus"></i> Add</button></td></tr>`;
+    }
+    const drift = Math.abs(+s.ctc_drift || 0) > 100;
+    return `<tr class="clickable" onclick="openStructureForm('${s.id}')">
+      <td>${personLine(emp, emp.designation, 30)}</td>
+      <td><div class="font-medium text-[13px]">${esc(s.name)}</div><div class="text-[11.5px] text-[#8b8fa3]">${esc(s.allowance_labels || 'no extra allowances')}</div></td>
+      <td class="num text-[12.5px]">${esc(s.effective_from_label || '—')}</td>
+      <td class="num">${inr(s.monthly_gross)}</td><td class="num text-[#c0392b]">${inr(s.monthly_deductions)}</td>
+      <td class="num font-semibold">${inr(s.monthly_net)}</td>
+      <td class="num">${inr(s.ctc)}${drift ? ` <span class="pill bg-[#fdecec] text-[#c0392b]" title="CTC on file differs from these components">Δ ${inr(s.ctc_drift)}</span>` : ''}</td>
+      <td class="text-right"><div class="row-actions force">
+        <button class="btn btn-ghost btn-xs !py-1" title="Edit" onclick="event.stopPropagation();openStructureForm('${s.id}')"><i class="fas fa-pen"></i></button>
+        <button class="btn btn-ghost btn-xs !py-1" title="Delete" onclick="event.stopPropagation();deleteStructure('${s.id}')"><i class="fas fa-trash"></i></button>
+        <button class="btn btn-ghost btn-xs !py-1" title="Preview slip" onclick="event.stopPropagation();previewStructure('${s.id}')"><i class="fas fa-file-invoice-dollar"></i></button></div></td></tr>`;
+  }).join('');
+  host.innerHTML = `<div class="flex flex-wrap items-center gap-2 mb-3">
+      <div class="text-[12px] text-[#6b7085] flex-1">${shown.length} of ${rows.length} employee(s)${only ? ' without a structure' : ''} · components are monthly, CTC is annual</div>
+      <button class="btn ${only ? 'btn-primary' : 'btn-ghost'} btn-xs" onclick="filterStructures('${only ? 'all' : 'missing'}')"><i class="fas fa-filter"></i> Without a structure</button>
+      <button class="btn btn-primary btn-xs" onclick="openStructureForm()"><i class="fas fa-plus"></i> New structure</button></div>
+    ${rows.length ? `<table class="kt"><thead><tr><th>Employee</th><th>Structure</th><th>Effective</th><th>Gross / mo</th><th>Deductions / mo</th><th>Net / mo</th><th>CTC / yr</th><th class="text-right">Actions</th></tr></thead><tbody>${body || `<tr><td colspan="8">${emptyState('Everyone has a structure', '')}</td></tr>`}</tbody></table>`
+      : emptyState('No salary structures yet', 'Add one per employee - payroll runs from these.',
+          `<button class="btn btn-primary btn-xs" onclick="openStructureForm()"><i class="fas fa-plus"></i> New structure</button>`)}`;
+  // the components of the row are worth a look without opening the form
+  host.querySelectorAll('tr[data-none]').forEach(() => {});
+  if (line) host.dataset.ready = '1';
 }
-function setPayTab(t) { $$('#module-payroll [data-paytab]').forEach(x => x.classList.toggle('active', x.dataset.paytab === t)); }
+
+function myStructureCard(s) {
+  const line = items => (items || []).map(r => `<div class="flex items-center justify-between py-1.5 text-[12.5px]"><span>${esc(r.label)}</span><span class="num">${inr(r.amount)}</span></div>`).join('');
+  return `<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+    <div class="bg-[#fbfbfe] rounded-xl p-4"><div class="lbl">Monthly earnings</div>${line(s.earnings)}
+      <div class="flex items-center justify-between pt-2 mt-1 border-t border-[#eef0f6] text-[13px] font-semibold"><span>Gross</span><span class="num">${inr(s.monthly_gross)}</span></div></div>
+    <div class="bg-[#fbfbfe] rounded-xl p-4"><div class="lbl">Monthly deductions</div>${line(s.deductions)}
+      <div class="flex items-center justify-between pt-2 mt-1 border-t border-[#eef0f6] text-[13px] font-semibold"><span>Total</span><span class="num text-[#c0392b]">${inr(s.monthly_deductions)}</span></div></div>
+    <div class="md:col-span-2 flex flex-wrap items-center gap-x-6 gap-y-2 p-3.5 rounded-xl bg-[#eef0ff] text-[12.5px]">
+      <span class="text-[#4a3db0]">Net before attendance: <b class="num">${inr(s.monthly_net)}</b> a month</span>
+      <span class="text-[#4a3db0]">Annual CTC: <b class="num">${inr(s.ctc)}</b></span>
+      <span class="text-[#6b7085]">Employer PF ${inr(s.employer_pf)}/mo is inside CTC, not deducted from you</span>
+      <span class="text-[#6b7085]">“${esc(s.name)}” in force since ${esc(s.effective_from_label)}</span>
+    </div>
+    <div class="md:col-span-2 text-[11.5px] text-[#8b8fa3]">Loss of pay is taken out of these numbers at month end from your attendance. Only HR can change a structure - raise it with them if something looks wrong.</div>
+  </div>`;
+}
+
+function filterStructures(mode) { APP.payStructFilter = mode === 'missing' ? 'missing' : 'all'; renderPayStructures(); }
+
+function structureRow(label, name, value, hint) {
+  return fieldRow(label, name, value, { type: 'number', step: '1', min: 0, class: 'field num', oninput: 'payStructureTotals()', hint });
+}
+
+function openStructureForm(id, presetEmployee) {
+  const rows = APP.payStructures || [];
+  const s = id ? rows.find(r => r.id === id) : { missing: true, form: {} };
+  if (id && !s) { toast('Open the Structures tab first', 'warn'); return; }
+  const f = s.form || {};
+  const emp = s.employee || {};
+  const empSelect = isAdmin() && !id
+    ? fieldRow('Employee', 'st_employee', s.employee_id || presetEmployee || '', { type: 'select', options: employeeOptions('').slice(1), placeholder: '', required: true })
+    : `<div><div class="lbl">Employee</div><div class="text-[13.5px] font-medium">${esc(emp.full_name || '—')}</div><div class="text-[11.5px] text-[#8b8fa3]">${esc(emp.department || '')}${emp.designation ? ' · ' + esc(emp.designation) : ''}</div></div>`;
+  const earns = PAY_EARN.map(([col, label]) => structureRow(label, 'st_' + col, f[col] || 0)).join('');
+  const deducts = PAY_DEDUCT.map(([col, label]) => structureRow(label, 'st_' + col, f[col] || 0)).join('');
+  const allowRows = ((f.allowances || []).length ? f.allowances : []).map(a => allowanceRow(a.label, a.amount)).join('');
+  const body = `${grid('md:grid-cols-2', empSelect + fieldRow('Structure name', 'st_name', f.name || 'Standard', { hint: 'One per revision, e.g. “Revised FY26-27”' }))}
+    ${grid('md:grid-cols-2', fieldRow('Effective from', 'st_effective_from', f.effective_from || (APP.todayIso || todayIso()), { type: 'date', hint: 'Payroll picks the latest structure that has started' }))}
+    <div class="lbl mt-4">Monthly earnings</div>${grid('md:grid-cols-3', earns)}
+    <div class="flex items-center gap-2 mt-3"><div class="lbl flex-1">Other monthly allowances</div>
+      <button class="btn btn-ghost btn-xs" onclick="addAllowanceRow()"><i class="fas fa-plus"></i> Add line</button></div>
+    <div id="st_allowances" class="space-y-2">${allowRows || `<div class="text-[11.5px] text-[#8b8fa3]">No extra allowances - travel, internet and the like go here.</div>`}</div>
+    <div class="lbl mt-4">Monthly deductions</div>${grid('md:grid-cols-3', deducts + structureRow('Employer PF', 'st_employer_pf', f.employer_pf || 0, 'part of CTC, not taken from the employee'))}
+    ${grid('md:grid-cols-2', structureRow('Annual CTC (optional)', 'st_ctc', f.ctc || '', 'blank = derived from the components above'))}
+    <div id="st_totals" class="mt-3"></div>`;
+  openModal(id ? 'Edit salary structure' : 'New salary structure', body, modalFootSave(`submitStructure('${id || ''}')`, id ? 'Save changes' : 'Create structure'), 'max-w-3xl');
+  payStructureTotals();
+}
+
+function allowanceRow(label, amount) {
+  return `<div class="flex items-center gap-2 allow-row">
+    <input class="field !py-1.5 allow-label" placeholder="Internet" value="${esc(label || '')}">
+    <input class="field !py-1.5 num allow-amount !w-32" type="number" min="0" step="1" value="${esc(amount || 0)}" oninput="payStructureTotals()">
+    <button class="btn btn-ghost btn-xs !py-1" title="Remove" onclick="this.closest('.allow-row').remove();payStructureTotals()"><i class="fas fa-times"></i></button></div>`;
+}
+
+function addAllowanceRow() {
+  const host = $('#st_allowances');
+  if (!host.querySelector('.allow-row')) host.innerHTML = '';
+  host.insertAdjacentHTML('beforeend', allowanceRow('', 0));
+  const rows = host.querySelectorAll('.allow-label');
+  if (rows.length) rows[rows.length - 1].focus();
+  payStructureTotals();
+}
+
+function structureFormValues() {
+  const nums = id => { const el = $('#' + id); return el ? (+el.value || 0) : 0; };
+  const allow = [];
+  document.querySelectorAll('#st_allowances .allow-row').forEach(r => {
+    const label = (r.querySelector('.allow-label').value || '').trim();
+    const amount = +r.querySelector('.allow-amount').value || 0;
+    if (label) allow.push({ label, amount });
+  });
+  const emp = $('#st_employee');
+  return { employee_id: emp ? emp.value : (APP.payStructureEmployee || ''), name: ($('#st_name') || {}).value,
+           effective_from: ($('#st_effective_from') || {}).value, ctc: nums('st_ctc') || null, employer_pf: nums('st_employer_pf'),
+           allowances: allow,
+           ...Object.fromEntries(PAY_EARN.concat(PAY_DEDUCT).map(([col]) => ['st_' + col, nums('st_' + col)])) };
+}
+
+function payStructureTotals() {
+  const box = $('#st_totals');
+  if (!box) return;
+  const v = structureFormValues();
+  const gross = PAY_EARN.reduce((t, [c]) => t + (+v['st_' + c] || 0), 0) + v.allowances.reduce((t, a) => t + a.amount, 0);
+  const ded = PAY_DEDUCT.reduce((t, [c]) => t + (+v['st_' + c] || 0), 0);
+  const net = gross - ded;
+  const derived = (gross + (+v.employer_pf || 0)) * 12;
+  const stated = +v.ctc || 0;
+  const bad = stated && Math.abs(stated - derived) > Math.max(100, derived * 0.01);
+  box.innerHTML = `<div class="flex flex-wrap items-center gap-x-5 gap-y-1.5 p-3 rounded-xl text-[12.5px] ${net <= 0 ? 'bg-[#fdecec] text-[#c0392b]' : bad ? 'bg-[#fff4e6] text-[#b7791f]' : 'bg-[#e6f9f0] text-[#0f7a45]'}">
+      <span>Gross <b class="num">${inr(gross)}</b>/mo</span><span>Deductions <b class="num">${inr(ded)}</b></span>
+      <span>Net <b class="num">${inr(net)}</b>/mo${net ? ` (${Math.round(net / gross * 100)}% of gross)` : ''}</span>
+      <span>CTC becomes <b class="num">${inr(derived)}</b></span>
+      ${net <= 0 ? '<span>net is not positive - payroll cannot run on this</span>'
+        : bad ? `<span>the CTC you typed is ${inr(Math.abs(stated - derived))} ${stated > derived ? 'above' : 'below'} that - clear the CTC box to derive it</span>` : ''}
+    </div>`;
+}
+
+async function submitStructure(id) {
+  const v = structureFormValues();
+  if (!v.employee_id && !id) { toast('Pick the employee this structure belongs to', 'error'); return; }
+  const body = { employee_id: v.employee_id || undefined, name: v.name, effective_from: v.effective_from,
+                 ctc: v.ctc || undefined, employer_pf: v.employer_pf, allowances: v.allowances,
+                 ...Object.fromEntries(PAY_EARN.concat(PAY_DEDUCT).map(([c]) => [c, +v['st_' + c] || 0])) };
+  try {
+    const r = id ? await api('/api/payroll/structures/' + id, { method: 'PUT', body })
+                 : await api('/api/payroll/structures', { method: 'POST', body });
+    closeAllModals(); toast(r.message, 'success'); loadPayroll();
+  } catch (e) { /* api() already showed the reason */ }
+}
+
+function deleteStructure(id) {
+  const s = (APP.payStructures || []).find(r => r.id === id) || {};
+  confirmAction(`Remove “${s.name || 'this structure'}” for ${(s.employee || {}).full_name || 'that employee'}? Past payslips keep the numbers they were paid on.`,
+    async () => { const r = await api('/api/payroll/structures/' + id, { method: 'DELETE' }); toast(r.message, 'success'); loadPayroll(); }, 'Delete structure');
+}
+
+async function previewStructure(id) {
+  const s = (APP.payStructures || []).find(r => r.id === id);
+  if (!s) return;
+  const per = payPeriod();
+  const line = items => (items || []).map(r => `<div class="flex items-center justify-between py-1 text-[12.5px]"><span>${esc(r.label)}</span><span class="num">${inr(r.amount)}</span></div>`).join('');
+  const gross = s.monthly_gross, ded = s.monthly_deductions;
+  openModal(`${(s.employee || {}).full_name || ''} - ${esc(per.label)} at this structure`,
+    `<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+       <div class="bg-[#fbfbfe] rounded-xl p-4"><div class="lbl">Earnings</div>${line(s.earnings)}<div class="flex items-center justify-between pt-2 mt-1 border-t border-[#eef0f6] text-[13px] font-semibold"><span>Gross</span><span class="num">${inr(gross)}</span></div></div>
+       <div class="bg-[#fbfbfe] rounded-xl p-4"><div class="lbl">Deductions</div>${line(s.deductions)}<div class="flex items-center justify-between pt-2 mt-1 border-t border-[#eef0f6] text-[13px] font-semibold"><span>Total</span><span class="num text-[#c0392b]">${inr(ded)}</span></div></div>
+     </div>
+     <div class="mt-3 p-3.5 rounded-xl bg-[#eef0ff] text-[13px] flex flex-wrap items-center gap-4">
+       <span class="text-[#4a3db0]">Net before attendance</span><b class="num text-[#4a3db0]">${inr(s.monthly_net)}</b>
+       <span class="text-[#6b7085] text-[12px]">Attendance is not applied in this preview - a day absent costs ${inr(Math.round(gross / 22))} here (gross ÷ working days).</span>
+     </div>`,
+    `<button onclick="closeAllModals()" class="btn btn-ghost mr-auto">Close</button><button onclick="closeAllModals();openStructureForm('${id}')" class="btn btn-primary"><i class="fas fa-pen"></i> Edit structure</button>`);
+}
+
+/* ------------------------------------------------------------------ the run */
+function openPayrollRun() {
+  const per = payPeriod();
+  const summary = APP.paySummary || {};
+  const missing = (summary.structures_missing || []).length;
+  APP.payStructureEmployee = $('#payEmployee') && $('#payEmployee').value ? $('#payEmployee').value : '';
+  openModal('Run payroll', `<div class="text-[12.5px] text-[#6b7085] mb-3">Payroll is generated from each employee's structure and their attendance for the month. Loss of pay is deducted; an existing slip that was already published is left alone unless you say otherwise.</div>
+    ${grid('md:grid-cols-2', fieldRow('Period', 'run_period', per.iso, { type: 'month' })
+      + fieldRow('Who', 'run_scope', APP.payStructureEmployee || '', { type: 'select', options: employeeOptions('Everyone active'), hint: 'Only the chosen employee, or everyone' }))}
+    <div class="space-y-2 mt-3">
+      ${fieldRow('Publish to employees immediately', 'run_publish', false, { type: 'checkbox' })}
+      ${fieldRow('Rebuild slips that are already published or paid', 'run_overwrite', false, { type: 'checkbox', hint: 'Numbers on released slips will change - use it for a correction, not for a routine run' })}
+    </div>
+    <div class="mt-3 p-3 rounded-xl bg-[#f6f7fb] text-[12px] text-[#6b7085]">${summary.employees_paid || 0} slip(s) already exist for ${esc(per.label)} · ${missing} employee(s) have no structure and will be skipped</div>`,
+    `<button onclick="closeAllModals()" class="btn btn-ghost mr-auto">Cancel</button><button id="runPayrollGo" class="btn btn-primary" onclick="submitPayrollRun()"><i class="fas fa-play"></i> Run payroll</button>`, 'max-w-xl');
+}
+
+async function submitPayrollRun() {
+  const btn = $('#runPayrollGo');
+  if (btn) btn.disabled = true;
+  const scope = ($('#run_scope') || {}).value;
+  const body = { period: ($('#run_period') || {}).value || payPeriod().iso,
+                 publish: !!($('#run_publish') || {}).checked, overwrite: !!($('#run_overwrite') || {}).checked };
+  if (scope) body.employee_ids = [scope];
+  let r;
+  try { r = await api('/api/payroll/run', { method: 'POST', body }); }
+  catch (e) { if (btn) btn.disabled = false; return; }
+  const skipped = (r.skipped || []).map(s => `<div class="flex items-center gap-2 py-1 text-[12.5px]"><i class="fas fa-minus-circle text-[#8b8fa3]"></i><span class="flex-1">${esc(s.employee)}</span><span class="text-[#8b8fa3]">${esc(s.reason)}</span></div>`).join('');
+  const kept = (r.kept || []).map(s => `<div class="flex items-center gap-2 py-1 text-[12.5px]"><i class="fas fa-lock text-[#b7791f]"></i><span class="flex-1">${esc(s.employee)}</span>${statusPill(s.status)}</div>`).join('');
+  openModal('Payroll run finished', `<div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+      ${[['Generated', r.created, 'good'], ['Updated', r.updated, 'brand'], ['Left alone', (r.kept || []).length, ''], ['Skipped', (r.skipped || []).length, 'warn']]
+        .map(([l, v, tone]) => `<div class="p-3 rounded-xl bg-[#f6f7fb]"><div class="text-[10.5px] uppercase tracking-widest text-[#8b8fa3] font-semibold">${l}</div><div class="font-display font-bold text-[20px] num ${tone === 'good' ? 'text-[#0f9d58]' : tone === 'warn' ? 'text-[#b7791f]' : tone === 'brand' ? 'text-[#584ac0]' : ''}">${v}</div></div>`).join('')}
+    </div>
+    <div class="p-3.5 rounded-xl bg-[#eef0ff] text-[13px] text-[#4a3db0] mb-3">${inr(r.net_payroll)} net to ${r.employees} employee(s) · ${inr(r.deductions)} deductions</div>
+    ${skipped ? `<div class="lbl">Skipped</div>${skipped}` : ''}${kept ? `<div class="lbl mt-3">Already released, not touched</div>${kept}` : ''}
+    <div class="text-[11.5px] text-[#8b8fa3] mt-3">${esc(r.next || '')}</div>`,
+    `<button onclick="closeAllModals();loadPayroll()" class="btn btn-ghost mr-auto">Close</button><button onclick="closeAllModals();loadPayroll();publishPayroll()" class="btn btn-primary"><i class="fas fa-paper-plane"></i> Publish the drafts</button>`, 'max-w-xl');
+  toast(r.message, 'success');
+  loadPayroll();
+}
+
+async function publishPayroll(slipId) {
+  const q = slipId ? { employee_ids: null } : {};
+  const ids = slipId ? [slipId] : [];
+  const doIt = async () => {
+    if (slipId) { const r = await api('/api/payslips/' + slipId, { method: 'PUT', body: { status: 'Published' } }); toast(r.message, 'success'); }
+    else { const r = await api('/api/payroll/publish', { method: 'POST', body: { period: payPeriod().iso, ...q } }); toast(r.message, 'success'); }
+    loadPayroll();
+  };
+  if (slipId) { try { await doIt(); } catch (e) {} return; }
+  confirmAction(`Release every draft payslip for ${payPeriod().label} so employees can open them?`, doIt, 'Publish');
+}
+
+function markPayrollPaid() {
+  const per = payPeriod();
+  openModal('Mark payroll paid', `<div class="text-[12.5px] text-[#6b7085] mb-3">Every published slip for the period becomes Paid and gets the date you record here. Employees see “Paid ₹…” on their slip the same moment.</div>
+    ${grid('md:grid-cols-2', fieldRow('Period', 'paid_period', per.iso, { type: 'month' }) + fieldRow('Value date', 'paid_on', APP.todayIso || todayIso(), { type: 'date' }))}`,
+    modalFootSave('submitMarkPaid()', 'Mark paid'), 'max-w-md');
+}
+
+async function submitMarkPaid() {
+  try {
+    const r = await api('/api/payroll/mark-paid', { method: 'POST', body: { period: ($('#paid_period') || {}).value, paid_on: ($('#paid_on') || {}).value } });
+    closeAllModals(); toast(r.message, 'success'); loadPayroll();
+  } catch (e) {}
+}
+
+function openPayslipEdit(id) {
+  const s = (APP.paySlips || []).find(r => r.id === id) || {};
+  const lock = (s.status && s.status !== 'Draft') ? { disabled: true } : {};
+  openModal(`Edit ${(s.employee || {}).full_name || 'payslip'} · ${esc(s.period_label || '')}`,
+    `<div class="text-[12.5px] text-[#6b7085] mb-3">A bonus or a recovery is added to what the structure and attendance already produced. Saving recomputes gross, deductions and net.</div>
+     ${grid('md:grid-cols-2', fieldRow('Bonus / arrears', 'ps_bonus', s.bonus || 0, { type: 'number', min: 0, step: '1', class: 'field num', ...lock })
+       + fieldRow('Other recovery', 'ps_recovery', s.deductions || 0, { type: 'number', min: 0, step: '1', class: 'field num', ...lock }))}
+     ${(s.status && s.status !== 'Draft') ? `<div class="mb-3 p-3 rounded-xl bg-[#fff8e6] text-[12px] text-[#8a6d1b]">This slip was released as ${esc(s.status)}, so its amounts are locked. Revoke it back to Draft to change them; the status and the paid-on date can still be set here.</div>` : ''}
+     ${grid('md:grid-cols-2', fieldRow('Status', 'ps_status', s.status || 'Draft', { type: 'select', options: ['Draft', 'Published', 'Paid'] })
+       + fieldRow('Paid on', 'ps_paid', s.paid_on || '', { type: 'date' }))}
+     ${fieldRow('Note on the slip', 'ps_notes', s.notes || '', { type: 'textarea', rows: 2, placeholder: 'Why this was corrected - the employee sees it on the payslip' })}
+     <div class="mt-3 p-3 rounded-xl bg-[#f6f7fb] text-[12px] text-[#6b7085] num">${esc(s.days_label || '—')} · currently ${inr(s.net_pay)}</div>`,
+    modalFootSave(`submitPayslipEdit('${id}')`, 'Save and recompute'), 'max-w-xl');
+}
+
+async function submitPayslipEdit(id) {
+  const val = n => { const el = $('#' + n); return el ? el.value : ''; };
+  const body = { bonus: +val('ps_bonus') || 0, deductions: +val('ps_recovery') || 0, status: val('ps_status'),
+                 notes: val('ps_notes') || null, paid_on: val('ps_paid') || null };
+  try { const r = await api('/api/payslips/' + id, { method: 'PUT', body }); closeAllModals(); toast(r.message, 'success'); loadPayroll(); }
+  catch (e) {}
+}
+
+function revokePayslip(id) {
+  confirmAction('Pull this slip back to Draft? The employee loses access to it immediately, and the reason goes on the slip.',
+    async () => {
+      const r = await api(`/api/payslips/${id}/revoke`, { method: 'POST', body: { reason: 'Corrected after review by HR' } });
+      toast(r.message, 'success'); loadPayroll();
+    }, 'Revoke slip');
+}
+
+function setPayTab(t) {
+  $$('#module-payroll [data-paytab]').forEach(x => x.classList.toggle('active', x.dataset.paytab === t));
+  $$('#module-payroll [data-paypane]').forEach(x => x.classList.toggle('active', x.dataset.paypane === t));
+}
+
 async function openPayslipDetail(id) {
   let d;
   try { d = await api('/api/payslips/' + id + '/detail'); } catch (e) { return; }
-  const c = d.company || {}, s = d.payslip || {};
+  const c = d.company || {}, s = d.payslip || {}, bank = d.bank || {}, days = d.days || {}, st = d.structure || {};
   const line = r => `<tr><td class="py-1.5 text-[12.5px]">${esc(r.label)}</td><td class="py-1.5 text-right num text-[12.5px]">${inr(r.amount, 2)}</td></tr>`;
+  const lost = (days.lost_days || []).map(l => `<span class="pill bg-[#fdecec] text-[#c0392b]" title="${esc(l.kind)}">${esc(l.label)} · ${l.days} d</span>`).join(' ');
+  const foot = `<button onclick="window.print()" class="btn btn-ghost mr-auto"><i class="fas fa-print"></i> Print / save PDF</button>`
+    + (isAdmin() ? `<button onclick="closeAllModals();openPayslipEdit('${s.id}')" class="btn btn-ghost"><i class="fas fa-pen"></i> Edit</button>
+        ${s.status === 'Draft' ? `<button onclick="closeAllModals();publishPayroll('${s.id}')" class="btn btn-primary"><i class="fas fa-paper-plane"></i> Publish</button>`
+                               : `<button onclick="closeAllModals();revokePayslip('${s.id}')" class="btn btn-ghost"><i class="fas fa-rotate-left"></i> Revoke</button>`}` : '')
+    + `<button onclick="closeAllModals()" class="btn btn-ghost">Close</button>`;
   openModal(`${s.period_label} payslip`, `<div class="print-area">
     <div class="flex items-start justify-between pb-4 border-b border-[#f4f5fa]"><div><div class="font-display font-bold text-[16px]">${esc(c.name || 'Ekkaa Technologies')}</div><div class="text-[11.5px] text-[#8b8fa3]">${esc(c.address || '')} · GSTIN ${esc(c.gstin || '')}</div></div>
       <div class="text-right"><div class="text-[11px] uppercase tracking-widest text-[#8b8fa3] font-semibold">Payslip</div><div class="font-display font-bold text-[15px]">${esc(s.period_label)}</div><span class="pill bg-[#f6f7fb] text-[#6b7085]">${esc(s.employee?.employee_code || '')}</span></div></div>
     <div class="grid grid-cols-2 gap-5 py-4">
       <div><div class="lbl">Employee</div><div class="text-[13.5px] font-semibold">${esc(s.employee?.full_name || '')}</div><div class="text-[12px] text-[#6b7085]">${esc(s.employee?.designation || '')} · ${esc(s.employee?.department || '')}</div><div class="text-[12px] text-[#8b8fa3]">${esc(s.employee?.work_location || '')}</div></div>
-      <div class="text-right"><div class="lbl">Net pay</div><div class="font-display font-bold text-[24px] text-[#0f9d58] num">${inr(d.net)}</div><div class="text-[11.5px] text-[#8b8fa3]">${s.paid_on ? 'paid ' + fmtDate(s.paid_on) : (s.status || '')}</div></div></div>
+      <div class="text-right"><div class="lbl">Net pay</div><div class="font-display font-bold text-[24px] text-[#0f9d58] num">${inr(d.net)}</div><div class="text-[11.5px] text-[#8b8fa3]">${s.paid_on ? 'paid ' + fmtDate(s.paid_on) : esc(s.status_label || s.status || '')}</div></div></div>
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-3 mb-4 text-[12px]">
+      ${[['Working days', num(days.working_days ?? d.working_days ?? 0)], ['Payable days', num(days.payable_days ?? d.payable_days ?? 0)], ['Loss of pay', num(d.lop_days ?? 0)], ['Structure', esc(st.name || '—')]]
+        .map(([l, v]) => `<div class="bg-[#f6f7fb] rounded-lg p-2.5"><div class="text-[10px] uppercase tracking-widest text-[#8b8fa3] font-semibold">${l}</div><div class="font-medium num mt-0.5">${v}</div></div>`).join('')}</div>
+    ${lost ? `<div class="mb-4"><div class="lbl">Days deducted</div><div class="flex flex-wrap gap-1.5">${lost}</div></div>` : ''}
     <div class="grid grid-cols-1 md:grid-cols-2 gap-5 bg-[#fbfbfe] rounded-xl p-4">
       <div><div class="lbl">Earnings</div><table class="w-full">${(d.earnings || []).map(line).join('')}<tr class="border-t border-[#eef0f6]"><td class="pt-2 text-[12.5px] font-semibold">Gross</td><td class="pt-2 text-right num font-semibold">${inr(d.gross, 2)}</td></tr></table></div>
       <div><div class="lbl">Deductions</div><table class="w-full">${(d.deductions || []).map(line).join('')}<tr class="border-t border-[#eef0f6]"><td class="pt-2 text-[12.5px] font-semibold">Total</td><td class="pt-2 text-right num font-semibold">${inr(d.deductions_total, 2)}</td></tr></table></div></div>
     <div class="flex items-center justify-between mt-4 p-3.5 rounded-xl bg-[#eef0ff] text-[13px]"><span class="text-[#4a3db0]">Net pay credited</span><b class="num text-[#4a3db0]">${inr(d.net, 2)}</b></div>
+    ${d.net_in_words ? `<div class="text-[11.5px] text-[#6b7085] mt-1.5 italic">${esc(d.net_in_words)}</div>` : ''}
+    ${s.notes ? `<div class="mt-3 p-3 rounded-xl bg-[#fff9ec] text-[12px] text-[#8a6d1f]"><i class="fas fa-note-sticky mr-1"></i>${esc(s.notes)}</div>` : ''}
     ${(d.leaves_in_period || []).length ? `<div class="mt-4"><div class="lbl">Approved leave in this period</div>${d.leaves_in_period.map(l => `<div class="text-[12.5px] flex items-center gap-2 py-1"><span class="pill" style="background:${l.leave_color}22;color:${l.leave_color}">${esc(l.leave_type_label)}</span>${esc(l.period_label)} · ${num(l.days)} d</div>`).join('')}</div>` : ''}
-    <div class="mt-4 grid grid-cols-2 md:grid-cols-4 gap-3 text-[12px]">${[['Bank', d.structure?.bank_name || '—'], ['Account', d.structure?.bank_account_no || '—'], ['PAN', d.structure?.pan_no || '—'], ['Effective', fmtDate(d.structure?.effective_from)]].map(([l, v]) => `<div class="bg-[#f6f7fb] rounded-lg p-2.5"><div class="text-[10px] uppercase tracking-widest text-[#8b8fa3] font-semibold">${l}</div><div class="font-medium num mt-0.5">${esc(v)}</div></div>`).join('')}</div>
-    <p class="text-[11px] text-[#8b8fa3] mt-4">System generated payslip · ${esc(s.generated_at ? fmtDate(s.generated_at) : fmtDate(todayIso()))}</p></div>`,
-    `<button onclick="window.print()" class="btn btn-ghost mr-auto"><i class="fas fa-print"></i> Print / save PDF</button><button onclick="closeAllModals()" class="btn btn-ghost">Close</button>`);
+    <div class="mt-4 grid grid-cols-2 md:grid-cols-3 gap-3 text-[12px]">${[['Bank', bank.bank_name], ['Account', bank.account], ['IFSC', bank.ifsc], ['PAN', bank.pan], ['UAN', bank.uan], ['PF shop', bank.pf]]
+      .map(([l, v]) => `<div class="bg-[#f6f7fb] rounded-lg p-2.5"><div class="text-[10px] uppercase tracking-widest text-[#8b8fa3] font-semibold">${l}</div><div class="font-medium num mt-0.5">${esc(v || '—')}</div></div>`).join('')}</div>
+    <p class="text-[11px] text-[#8b8fa3] mt-4">System generated payslip · ${esc(s.generated_at ? fmtDate(s.generated_at) : fmtDate(todayIso()))}${s.generated_by ? ' · prepared by ' + esc(s.generated_by) : ''}</p></div>`,
+    foot);
 }
 
 /* ================================================================== EXPENSES */
