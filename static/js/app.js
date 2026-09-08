@@ -1748,15 +1748,21 @@ function renderTsGrid() {
   const rows = APP.tsRows.map((r, i) => tsRowHtml(r, i, days)).join('');
   const wrap = $('#tsGridWrap');
   wrap.innerHTML = `<div class="ts-grid" id="tsGrid">${head}${rows}</div>
-    <div class="flex items-center justify-between mt-3 text-[12px] text-[#8b8fa3]"><span>Enter hours per day (0–16). The week can be submitted once at least 20 hours are logged.</span><span id="tsDayTotals" class="num"></span></div>`;
+    <div class="flex items-center justify-between mt-3 text-[12px] text-[#8b8fa3]"><span>Enter hours per day (0–16). The week can be submitted once at least 20 hours are logged.</span><span class="flex items-center gap-3"><button onclick="openProjectForm(null)" class="btn btn-ghost btn-xs" title="Add a project that is not on the list"><i class="fas fa-plus"></i> New project</button><span id="tsDayTotals" class="num"></span></span></div>`;
   recalcTs();
 }
 function tsRowHtml(r, i, days) {
   const dis = APP.tsLocked ? 'disabled' : '';
-  const projOpts = [{ value: '', label: 'Select project…' }, ...(APP.ts.projects || []).map(p => ({ value: p.id, label: `${p.name}${p.billing_rate ? ' · ₹' + p.billing_rate + '/h' : ''}` }))];
+  const cur = (APP.ts.projects || []).find(p => String(p.id) === String(r.project_id));
+  const projOpts = tsProjectChoices(r.project_id);
   const projCell = `<select class="field !py-1.5 !text-[12px]" ${dis} onchange="tsRowProject(${i}, this.value)">${projOpts.map(o => `<option value="${esc(o.value)}" ${String(o.value) === String(r.project_id ?? '') ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}</select>`;
+  const manage = (cur && !APP.tsLocked && canManageProject(cur))
+    ? `<div class="flex items-center gap-2.5 mt-1 text-[10.5px] text-[#8b8fa3]">
+         <button type="button" class="hover:text-[#584ac0]" onclick="openProjectForm('${cur.id}')" title="Rename ${esc(cur.name)}, change its rate or close it"><i class="fas fa-pen"></i> edit</button>
+         <button type="button" class="hover:text-[#c0392b]" onclick="deleteProject('${cur.id}')" title="Take ${esc(cur.name)} off the list - only while nobody has logged hours on it"><i class="far fa-trash-alt"></i> remove</button>
+       </div>` : '';
   return [
-    `<div>${projCell}${(APP.ts.projects || []).find(p => String(p.id) === String(r.project_id))?.client ? `<div class="text-[10.5px] text-[#8b8fa3] mt-1">${esc((APP.ts.projects.find(p => String(p.id) === String(r.project_id))).client)}</div>` : ''}</div>`,
+    `<div>${projCell}${cur && cur.client && cur.client !== 'Internal' ? `<div class="text-[10.5px] text-[#8b8fa3] mt-1">${esc(cur.client)}</div>` : ''}${manage}</div>`,
     `<div><input class="field !py-1.5 !text-[12px]" ${dis} value="${esc(r.task || '')}" placeholder="what you worked on" onchange="APP.tsRows[${i}].task=this.value;recalcTs()"></div>`,
     `<div style="text-align:center"><input type="checkbox" ${dis} ${r.billable ? 'checked' : ''} onchange="APP.tsRows[${i}].billable=this.checked;recalcTs()" class="rounded border-[#d5d8e8] text-[#584ac0]" title="Billable to the client"></div>`,
     ...days.map(day => `<div class="${day.is_future || day.is_weekend ? 'ts-future' : ''}"><input class="ts-h" type="number" min="0" max="16" step="0.5" ${dis} value="${r.hours[day.date] != null ? r.hours[day.date] : ''}" placeholder="${day.is_future ? '–' : '0'}" onchange="setTsHours(${i},'${day.date}',this.value)" data-ts="${i}|${day.date}" title="${day.label} ${day.day_num}"></div>`),
@@ -1769,7 +1775,10 @@ function setTsHours(i, day, v) {
   APP.tsRows[i].hours[day] = n;
   recalcTs();
 }
-function tsRowProject(i, v) { APP.tsRows[i].project_id = v; renderTsGrid(); }
+function tsRowProject(i, v) {
+  if (v === '__new') { renderTsGrid(); openProjectForm(null, i); return; }   // the select's own "type a name" entry
+  APP.tsRows[i].project_id = v; renderTsGrid();
+}
 function recalcTs() {
   const days = APP.ts?.days || [];
   let total = 0, billable = 0;
@@ -1789,6 +1798,82 @@ function addTsRow() {
   if (APP.tsLocked) { toast('This week is approved and locked', 'warn'); return; }
   APP.tsRows.push({ project_id: (APP.ts.projects?.[0]?.id) || '', task: '', billable: true, hours: {} });
   renderTsGrid();
+}
+/* the grid is only as good as the project list it offers, so people can extend that list here */
+function canManageProject(p) {
+  if (!p) return false;
+  return isAdmin() || (!!APP.user.employee_id && String(p.manager_id || '') === String(APP.user.employee_id));
+}
+function tsProjectChoices(currentId) {
+  const all = (APP.ts && APP.ts.projects) || [];
+  // a closed project stays on the list for the row that already uses it, so logged hours never go homeless
+  const usable = all.filter(p => !p.status || p.status === 'Active' || p.status === 'On Hold'
+    || String(p.id) === String(currentId || ''));
+  return [{ value: '', label: 'Select project…' },
+          ...usable.map(p => ({ value: p.id,
+            label: `${p.name}${p.billing_rate ? ' · ' + inr(p.billing_rate) + '/h' : ''}${p.status && p.status !== 'Active' ? ' · ' + p.status : ''}` })),
+          { value: '__new', label: '+ Type a new project name…' }];
+}
+function tsTabActive(tab) {
+  const el = document.querySelector('#module-timesheet [data-tstab].active');
+  return !!el && el.dataset.tstab === tab;
+}
+function openProjectForm(id, rowIdx) {
+  const list = ((APP.ts && APP.ts.projects) || []).concat(APP.tsProjects || []);
+  const p = list.find(x => String(x.id) === String(id)) || {};
+  APP.pjRow = (rowIdx === null || rowIdx === undefined) ? null : Number(rowIdx);
+  const isNew = !id;
+  openModal(isNew ? 'Add a project' : `Edit ${p.name || 'project'}`,
+    `<div class="text-[12.5px] text-[#6b7085] mb-3">A project is the name the grid puts hours against. If what you are working on is not on the list, add it here — the code is made from the name, and a rate of 0 means internal time.</div>
+     ${grid('md:grid-cols-2', fieldRow('Project name', 'pj_name', p.name || '', { required: true, placeholder: 'e.g. Acme Website Revamp' })
+       + fieldRow('Code', 'pj_code', p.code || '', { placeholder: 'leave blank and one is made for you', hint: 'Upper case, short, and nobody else can have it' }))}
+     ${grid('md:grid-cols-3', fieldRow('Client', 'pj_client', p.client || '', { placeholder: 'Who it is for' })
+       + fieldRow('Billing rate (₹ per hour)', 'pj_rate', p.billing_rate || 0, { type: 'number', min: 0, step: '50', class: 'field num' })
+       + fieldRow('Status', 'pj_status', p.status || 'Active', { type: 'select', options: ['Active', 'On Hold', 'Completed', 'Closed'] }))}
+     ${fieldRow('Project manager', 'pj_manager', p.manager_id || (isNew ? (APP.user.employee_id || '') : ''), { type: 'select', options: employeeOptions('No manager'), hint: 'That person — or HR — can rename the project afterwards; nobody else can' })}
+     <div class="mt-3 p-3 rounded-xl bg-[#f6f7fb] text-[12px] text-[#6b7085]">Anything with hours already logged against it cannot be deleted — mark it Completed or Closed instead, so the time people claimed keeps somewhere to live.</div>`,
+    `<button onclick="closeAllModals();renderTsGrid()" class="btn btn-ghost mr-auto">Cancel</button><button id="pjSaveGo" class="btn btn-primary" onclick="submitProject(${isNew ? 'null' : `'${id}'`})">${isNew ? 'Add project' : 'Save changes'}</button>`,
+    'max-w-xl');
+}
+async function submitProject(id) {
+  const v = n => { const el = $('#' + n); return el ? el.value : ''; };
+  const body = { name: (v('pj_name') || '').trim(), code: (v('pj_code') || '').trim().toUpperCase(),
+                 client: (v('pj_client') || '').trim(), billing_rate: +v('pj_rate') || 0,
+                 status: v('pj_status') || 'Active', manager_id: v('pj_manager') || null };
+  if (!body.name) { toast('A project needs a name', 'error'); return; }
+  const btn = $('#pjSaveGo');
+  if (btn) btn.disabled = true;
+  let r;
+  try { r = await api('/api/projects' + (id ? '/' + id : ''), { method: id ? 'PUT' : 'POST', body }); }
+  catch (e) { if (btn) btn.disabled = false; return; }
+  const p = r.project || {};
+  // fold it into what is on screen instead of refetching: a reload would throw away the hours being typed
+  APP.ts = APP.ts || {};
+  const list = APP.ts.projects || [];
+  const at = list.findIndex(x => String(x.id) === String(p.id));
+  if (at >= 0) list[at] = { ...list[at], ...p }; else list.push(p);
+  APP.ts.projects = list;
+  if (APP.tsProjects) {
+    const j = APP.tsProjects.findIndex(x => String(x.id) === String(p.id));
+    if (j >= 0) APP.tsProjects[j] = { ...APP.tsProjects[j], ...p }; else APP.tsProjects.push(p);
+  }
+  if (!id && APP.pjRow !== null && APP.tsRows[APP.pjRow]) APP.tsRows[APP.pjRow].project_id = p.id;
+  toast(r.message, 'success');
+  closeAllModals();
+  if (tsTabActive('projects')) loadTsProjects();
+  if (currentModule === 'timesheet') renderTsGrid();
+}
+function deleteProject(id) {
+  const p = ((APP.ts && APP.ts.projects) || []).find(x => String(x.id) === String(id));
+  confirmAction(`Take ${p ? p.name : 'this project'} off the list? That is only allowed while nobody has logged hours against it - otherwise mark it Completed.`, async () => {
+    const r = await api('/api/projects/' + id, { method: 'DELETE' });
+    APP.ts.projects = (APP.ts.projects || []).filter(x => String(x.id) !== String(id));
+    if (APP.tsProjects) APP.tsProjects = APP.tsProjects.filter(x => String(x.id) !== String(id));
+    (APP.tsRows || []).forEach(row => { if (String(row.project_id) === String(id)) row.project_id = ''; });
+    toast(r.message, 'success');
+    if (currentModule === 'timesheet') renderTsGrid();
+    if (tsTabActive('projects')) loadTsProjects();
+  }, 'Remove project');
 }
 async function saveTimesheet(submit) {
   const entries = [];
@@ -1837,67 +1922,23 @@ async function loadTsHistory() {
     box.innerHTML = `<table class="kt"><thead><tr><th>Week</th><th>Entries</th><th>Total</th><th>Billable</th><th>Utilisation</th><th>Submitted</th><th>Approved by</th><th>Status</th></tr></thead><tbody>${rows.map(t => `<tr><td class="num font-medium">${esc(t.week_label || t.week_starting)}</td><td class="num">${t.entry_count}</td><td class="num">${num(t.total_hours)} h</td><td class="num">${num(t.billable_hours)} h</td><td class="num">${t.utilization_pct}%</td><td class="num text-[12px]">${t.submitted_at ? fmtDate(t.submitted_at) : '—'}</td><td class="text-[12.5px]">${esc(t.reviewer?.full_name || '—')}</td><td>${statusPill(t.status)}</td></tr>`).join('')}</tbody></table>`;
   } catch (e) { box.innerHTML = emptyState('Could not load history'); }
 }
-let tsProjectsCache = [];
 async function loadTsProjects() {
   const box = $('#tsProjectsTable');
   box.innerHTML = '<div class="spin"></div>';
   try {
     const rows = await api('/api/projects');
-    tsProjectsCache = rows;
-    const admin = isAdmin();
-    const head = `<tr><th>Project</th><th>Client</th><th>Manager</th><th>Team</th><th>Rate</th><th>This week</th><th>All time</th><th>Billable value</th><th>Status</th>${admin ? '<th></th>' : ''}</tr>`;
-    const body = rows.map(p => `<tr><td><div class="font-medium">${esc(p.name)}</div><div class="text-[11px] text-[#8b8fa3] num">${esc(p.code)}</div></td><td>${esc(p.client || 'Internal')}</td><td class="text-[12.5px]">${esc(p.manager?.full_name || '—')}</td><td class="text-[12.5px]">${(p.team || []).map(esc).join(', ') || '<span class="text-[#8b8fa3]">none yet</span>'}</td><td class="num">${p.billing_rate ? inr(p.billing_rate) + '/h' : '—'}</td><td class="num">${num(p.hours_this_week)} h</td><td class="num">${num(p.total_hours)} h</td><td class="num">${p.billable_value ? compactInr(p.billable_value) : '—'}</td><td>${statusPill(p.status)}</td>${admin ? `<td style="white-space:nowrap"><button class="btn btn-ghost btn-xs" onclick="openProjectModal('${esc(p.id)}')" title="Edit project"><i class="fas fa-pen text-[11px]"></i></button> <button class="btn btn-ghost btn-xs" onclick="deleteProject('${esc(p.id)}')" title="Delete project"><i class="far fa-trash-alt text-[11px]"></i></button></td>` : ''}</tr>`).join('');
-    box.innerHTML = `${admin ? `<div class="flex items-center justify-between mb-3"><p class="text-[12.5px] text-[#8b8fa3]">Projects employees can book hours against in the weekly grid.</p><button onclick="openProjectModal()" class="btn btn-primary btn-xs"><i class="fas fa-plus"></i> New project</button></div>` : ''}<table class="kt"><thead>${head}</thead><tbody>${body}</tbody></table>`;
+    APP.tsProjects = rows;
+    // this tab is HR-only, and HR may change anything; the trash still says why a used project stays
+    const act = p => `<button type="button" class="btn btn-ghost btn-xs" onclick="openProjectForm('${p.id}')" title="Rename ${esc(p.name)}, move its rate or change its status"><i class="fas fa-pen"></i></button>
+         <button type="button" class="btn btn-ghost btn-xs" onclick="deleteProject('${p.id}')" title="${num(p.total_hours) ? num(p.total_hours) + ' h are logged against it, so it cannot be deleted - mark it Completed instead' : 'Take it off the list - allowed because nobody has logged hours on it'}"><i class="far fa-trash-alt"></i></button>`;
+    box.innerHTML = `<div class="flex items-start justify-between gap-3 mb-3">
+        <p class="text-[12.5px] text-[#8b8fa3] max-w-xl">Hours people log land here, so a project is never deleted once anything has been claimed against it — close it instead. Anyone on the team can add a project from the grid; renaming one is the manager's or HR's.</p>
+        <button onclick="openProjectForm(null)" class="btn btn-primary btn-xs shrink-0"><i class="fas fa-plus"></i> New project</button></div>
+      <table class="kt"><thead><tr><th>Project</th><th>Client</th><th>Manager</th><th>Team</th><th>Rate</th><th>This week</th><th>All time</th><th>Billable value</th><th>Status</th><th></th></tr></thead>
+      <tbody>${rows.map(p => `<tr><td><div class="font-medium">${esc(p.name)}</div><div class="text-[11px] text-[#8b8fa3] num">${esc(p.code)}</div></td><td>${esc(p.client || 'Internal')}</td><td class="text-[12.5px]">${esc(p.manager?.full_name || '—')}</td><td class="text-[12.5px]">${(p.team || []).map(esc).join(', ') || '<span class="text-[#8b8fa3]">none yet</span>'}</td><td class="num">${p.billing_rate ? inr(p.billing_rate) + '/h' : '—'}</td><td class="num">${num(p.hours_this_week)} h</td><td class="num">${num(p.total_hours)} h</td><td class="num">${p.billable_value ? compactInr(p.billable_value) : '—'}</td><td>${statusPill(p.status)}</td><td class="text-right whitespace-nowrap">${act(p)}</td></tr>`).join('')}</tbody></table>`;
   } catch (e) { box.innerHTML = emptyState('Could not load projects'); }
 }
-function openProjectModal(id) {
-  if (!isAdmin()) { toast('Only HR Admins can manage projects', 'warn'); return; }
-  const p = tsProjectsCache.find(x => String(x.id) === String(id)) || null;
-  const isEdit = !!p;
-  openModal(isEdit ? 'Edit project' : 'New project',
-    grid('md:grid-cols-2', [
-      fieldRow('Project name', 'prj_name', p?.name || '', { required: true, placeholder: 'e.g. Mobile App Revamp' }),
-      fieldRow('Code', 'prj_code', p?.code || '', { required: true, placeholder: 'e.g. MOB-01', hint: 'Short unique code shown on timesheets' }),
-      fieldRow('Client', 'prj_client', p?.client || '', { placeholder: 'Leave blank for internal work' }),
-      fieldRow('Manager', 'prj_manager', p?.manager_id || '', { type: 'select', options: employeeOptions('No manager') }),
-      fieldRow('Billing rate (₹ per hour)', 'prj_rate', p?.billing_rate ?? '', { type: 'number', step: '0.5', min: 0 }),
-      fieldRow('Status', 'prj_status', p?.status || 'Active', { type: 'select', options: ['Active', 'On Hold', 'Completed', 'Archived'] }),
-    ].join('')),
-    modalFootSave(`saveProject(${isEdit ? `'${esc(p.id)}'` : ''})`, isEdit ? 'Save changes' : 'Create project'));
-}
-async function saveProject(id) {
-  const body = {
-    name: needValue('prj_name', 'Project name is required'),
-    code: needValue('prj_code', 'Project code is required'),
-    client: ($('#prj_client')?.value || '').trim(),
-    manager_id: $('#prj_manager')?.value || null,
-    billing_rate: $('#prj_rate')?.value || null,
-    status: $('#prj_status')?.value || 'Active',
-  };
-  if (id) await api('/api/projects/' + id, { method: 'PUT', body });
-  else await api('/api/projects', { method: 'POST', body });
-  toast(id ? 'Project updated' : 'Project added — it is now selectable in the weekly grid', 'success');
-  closeAllModals();
-  await loadLookups(true);
-  // The open weekly grid keeps its own copy of the project list - refresh it in place so the
-  // new project is bookable without losing any hours already typed into APP.tsRows.
-  if (APP.ts) { APP.ts.projects = (APP.lookups || {}).projects || APP.ts.projects; renderTsGrid(); }
-  loadTsProjects();
-}
-function deleteProject(id) {
-  if (!isAdmin()) { toast('Only HR Admins can manage projects', 'warn'); return; }
-  const p = tsProjectsCache.find(x => String(x.id) === String(id));
-  confirmAction(`Delete project “${p?.name || 'this project'}”? Projects with logged hours cannot be deleted — archive them instead.`,
-    async () => {
-      await api('/api/projects/' + id, { method: 'DELETE' });
-      toast('Project deleted', 'success');
-      await loadLookups(true);
-      if (APP.ts) { APP.ts.projects = (APP.lookups || {}).projects || APP.ts.projects; renderTsGrid(); }
-      loadTsProjects();
-    }, 'Delete');
-}
 
-/* ================================================================== PAYROLL */
 /* ================================================================== PAYROLL */
 const PAY_EARN = [['basic', 'Basic'], ['hra', 'HRA'], ['special_allowance', 'Special Allowance']];
 const PAY_DEDUCT = [['pf', 'Provident Fund'], ['esi', 'ESI'], ['professional_tax', 'Professional Tax'],
