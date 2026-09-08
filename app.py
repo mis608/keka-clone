@@ -123,9 +123,11 @@ SUPA_COLUMNS = {
                        "status", "approver_id", "actioned_at", "admin_remark", "applied_at" },
     "holidays": {"name", "date", "type"},
     "payroll_structures": {"employee_id", "basic", "hra", "special_allowance", "pf", "esi",
+                           "name", "allowances", "employer_pf",
                            "professional_tax", "tds", "ctc", "effective_from"},
-    "payslips": {"employee_id", "month", "year", "gross_earnings", "total_deductions", "net_pay", "status",
-                 "payslip_url", "generated_at", "paid_on" },
+    "payslips": {"employee_id", "month", "year", "period", "gross_earnings", "total_deductions", "net_pay",
+                 "status", "payslip_url", "generated_at", "generated_by", "published_at", "paid_on",
+                 "bonus", "deductions", "lop_days", "payable_days", "working_days", "notes" },
     "reimbursements": {"employee_id", "category", "amount", "date", "description", "receipt_url", "status",
                        "reviewer_remark", "created_at" },
     "jobs": {"title", "department_id", "location", "employment_type", "experience", "salary_range", "openings",
@@ -852,8 +854,10 @@ def dashboard():
 @app.route("/api/session")
 def api_session():
     emp = current_employee()
-    return jsonify({"user": session.get("user"), "is_admin": is_admin(),
-                    "modules": allowed_modules(),
+    return jsonify({"user": session.get("user"), "is_admin": is_admin(), "modules": allowed_modules(),
+                    # the browser's clock is the container's (UTC); the office's date is what every
+                    # date default in the UI has to follow, so it is handed out with the session
+                    "office_date": str(today()), "office_time": now_local().strftime("%H:%M:%S"),
                     "must_set_password": bool((session.get("user") or {}).get("must_set_password")),
                     "security": {"has_own_password": has_own_password(emp), "min_length": MIN_PASSWORD_LENGTH},
                     "employee": employee_display((emp or {}).get("id")), "mock_mode": supabase is None})
@@ -2952,54 +2956,301 @@ def api_projects():
 
 
 # =================================================================== payroll
+PAYROLL_STATUSES = ("Draft", "Published", "Paid")
+# (column, payslip label) - the order here is the order a payslip prints them in.
+PAYROLL_EARNINGS = (("basic", "Basic"), ("hra", "HRA"), ("special_allowance", "Special Allowance"))
+PAYROLL_DEDUCTIONS = (("pf", "Provident Fund"), ("esi", "ESI"),
+                      ("professional_tax", "Professional Tax"), ("tds", "TDS / Income Tax"))
+# Attendance statuses that cost pay, and how much of a day each one costs.
+LOP_WEIGHTS = {"Absent": 1.0, "Absent - Unauthorised": 1.0, "Half Day": 0.5, "Half-day": 0.5}
+
+
+def allowance_map(value):
+    """Extra monthly earnings on a structure, stored as a jsonb object like `competencies`.
+
+    Postgres sorts jsonb keys, so the column cannot carry a display order; sorting in Python means
+    the same structure prints in the same order in demo mode and in the cloud.
+    """
+    if isinstance(value, str):
+        try:
+            value = json.loads(value or "{}")
+        except ValueError:
+            return {}
+    if not isinstance(value, dict):
+        return {}
+    out = {}
+    for key, amount in value.items():
+        label = str(key).strip()[:40]
+        if label:
+            out[label] = round(money(amount), 2)
+    return dict(sorted(out.items()))
+
+
+def structure_lines(structure):
+    """(earnings lines, deduction lines, monthly gross, monthly deductions) for one structure."""
+    if not structure:
+        return [], [], 0.0, 0.0
+    earn = [{"label": label, "amount": round(money(structure.get(col)), 2)} for col, label in PAYROLL_EARNINGS]
+    earn += [{"label": label, "amount": amount}
+             for label, amount in allowance_map(structure.get("allowances")).items() if amount]
+    ded = [{"label": label, "amount": round(money(structure.get(col)), 2)} for col, label in PAYROLL_DEDUCTIONS]
+    return earn, ded, round(sum(x["amount"] for x in earn), 2), round(sum(x["amount"] for x in ded), 2)
+
+
+def current_structure(employee_id, on=None):
+    """The payroll structure that pays this person on a date (default: today).
+
+    A person may hold several - one per revision - and the latest one that has already begun is the
+    live one. Sorted here rather than with an ORDER BY so a stale deployment missing a column cannot
+    break payroll the way it once broke the feedback list.
+    """
+    if not employee_id:
+        return {}
+    rows = [s for s in db_list("payroll_structures", {"employee_id": employee_id})]
+    if not rows:
+        return {}
+    day = str(on or today())[:10]
+    live = [s for s in rows if str(s.get("effective_from") or "")[:10] <= day]
+    return max(live or rows, key=lambda s: (str(s.get("effective_from") or ""), str(s.get("id"))))
+
+
+def enrich_structure(structure, employee=None):
+    """A structure plus every figure the UI would otherwise have to compute (and get wrong)."""
+    if not structure:
+        return {}
+    emp = employee if employee is not None else (employee_display(structure.get("employee_id")) or {})
+    earn, ded, gross, total_ded = structure_lines(structure)
+    employer_pf = round(money(structure.get("employer_pf")), 2)
+    stored_ctc = money(structure.get("ctc"))
+    derived_ctc = round((gross + employer_pf) * 12, 2)
+    ctc = stored_ctc or derived_ctc
+    net = round(gross - total_ded, 2)
+    row = dict(structure)
+    row.update({
+        "employee": emp or None, "employee_name": (emp or {}).get("full_name"),
+        "department": (emp or {}).get("department"), "designation": (emp or {}).get("designation"),
+        "earnings": earn, "deductions": ded, "allowances": allowance_map(structure.get("allowances")),
+        "allowance_labels": ", ".join(allowance_map(structure.get("allowances"))) or "—",
+        "monthly_gross": gross, "monthly_deductions": total_ded, "monthly_net": net,
+        "monthly": gross,                                  # the key the structures table already reads
+        "monthly_gross_label": inr(gross), "monthly_net_label": inr(net),
+        "employer_pf": employer_pf, "derived_ctc": derived_ctc,
+        "ctc": ctc, "ctc_label": inr(ctc), "ctc_drift": round(stored_ctc - derived_ctc, 2) if stored_ctc else 0.0,
+        "name": structure.get("name") or "Standard", "effective_from_label": fmt_day(structure.get("effective_from")),
+        "net_pct_of_gross": round(net / gross * 100) if gross else 0,
+        "form": {col: money(structure.get(col)) for col, _ in PAYROLL_EARNINGS + PAYROLL_DEDUCTIONS}
+                | {"employer_pf": employer_pf, "ctc": stored_ctc, "name": structure.get("name") or "Standard",
+                   "effective_from": str(structure.get("effective_from") or "")[:10] or str(today()),
+                   "allowances": [{"label": k, "amount": v} for k, v in allowance_map(structure.get("allowances")).items()]},
+    })
+    return row
+
+
+def amount_in_words(value):
+    """Money as an Indian payslip writes it: Rupees Twelve Lakh Fifty Thousand Only."""
+    ones = ("Zero One Two Three Four Five Six Seven Eight Nine Ten Eleven Twelve Thirteen Fourteen "
+            "Fifteen Sixteen Seventeen Eighteen Nineteen").split()
+    tens = ["", "", "Twenty", "Thirty", "Forty", "Fifty", "Sixty", "Seventy", "Eighty", "Ninety"]
+
+    def two(n):
+        return ones[n] if n < 20 else (tens[n // 10] + (" " + ones[n % 10] if n % 10 else "")).strip()
+
+    def three(n):
+        bits = ([f"{ones[n // 100]} Hundred"] if n // 100 else []) + ([two(n % 100)] if n % 100 else [])
+        return " ".join(bits)
+
+    amount = round(money(value), 2)
+    whole = int(amount)
+    if whole <= 0 and amount <= 0:
+        return "Rupees Zero Only"
+    crore, rest = divmod(whole, 10 ** 7)
+    lakh, rest = divmod(rest, 10 ** 5)
+    thousand, rest = divmod(rest, 10 ** 3)
+    hundred, rem = divmod(rest, 100)
+    parts = []
+    if crore:
+        parts.append(three(crore) + " Crore")
+    if lakh:
+        parts.append(three(lakh) + " Lakh")
+    if thousand:
+        parts.append(three(thousand) + " Thousand")
+    if hundred:
+        parts.append(f"{ones[hundred]} Hundred")
+    if rem:
+        parts.append(two(rem))
+    paise = int(round((amount - whole) * 100))
+    out = "Rupees " + " ".join(parts)
+    if paise:
+        out += f" and {two(paise)} Paise"
+    return out + " Only"
+
+
 def compute_payout(structure, extra_earnings=0, extra_deductions=0, paid_days=26, total_days=26):
-    basic = money(structure.get("basic"))
-    hra = money(structure.get("hra"))
-    special = money(structure.get("special_allowance"))
-    pf = money(structure.get("pf"))
-    esi = money(structure.get("esi"))
-    ptax = money(structure.get("professional_tax"))
-    tds = money(structure.get("tds"))
-    gross = basic + hra + special + money(extra_earnings)
+    """Gross, deductions and net for one month, including loss of pay.
+
+    Allowances on the structure are part of gross and are also the base for LOP: a per-day rate that
+    ignored an allowance would quietly overpay anyone with unpaid days.
+    """
+    earn, ded, gross_fixed, ded_fixed = structure_lines(structure)
+    extra_earnings, extra_deductions = round(money(extra_earnings), 2), round(money(extra_deductions), 2)
+    gross = round(gross_fixed + extra_earnings, 2)
     lwp = 0.0
-    if total_days and paid_days < total_days:
-        per_day = (basic + hra + special) / max(total_days, 1)
-        lwp = round(per_day * (total_days - paid_days), 2)
-    deductions = pf + esi + ptax + tds + money(extra_deductions) + lwp
-    net = gross - deductions
-    return {"earnings": [{"label": "Basic", "amount": basic}, {"label": "HRA", "amount": hra},
-                         {"label": "Special Allowance", "amount": special}] +
-                   ([{"label": "Bonus / Arrears", "amount": money(extra_earnings)}] if money(extra_earnings) else []),
-            "deductions": [{"label": "Provident Fund", "amount": pf}, {"label": "ESI", "amount": esi},
-                           {"label": "Professional Tax", "amount": ptax}, {"label": "TDS / Income Tax", "amount": tds}] +
-                          ([{"label": "Loss of Pay", "amount": lwp}] if lwp else []) +
-                          ([{"label": "Other Recovery", "amount": money(extra_deductions)}] if money(extra_deductions) else []),
-            "gross": round(gross, 2), "deductions_total": round(deductions, 2), "net": round(net, 2), "lwp": lwp}
+    total_days, paid_days = money(total_days), money(paid_days)
+    if total_days > 0 and paid_days < total_days:
+        lwp = round(gross_fixed / max(total_days, 1) * min(total_days - paid_days, total_days), 2)
+    deductions = round(ded_fixed + extra_deductions + lwp, 2)
+    earnings = list(earn)
+    if extra_earnings:
+        earnings.append({"label": "Bonus / Arrears", "amount": extra_earnings})
+    deductions_lines = list(ded)
+    if lwp:
+        deductions_lines.append({"label": f"Loss of Pay ({round(total_days - paid_days, 2)} d)", "amount": lwp})
+    if extra_deductions:
+        deductions_lines.append({"label": "Other Recovery", "amount": extra_deductions})
+    return {"earnings": earnings, "deductions": deductions_lines, "gross": gross,
+            "deductions_total": deductions, "net": round(gross - deductions, 2), "lwp": lwp,
+            "fixed_gross": gross_fixed}
+
+
+def payroll_period(data=None, args=None):
+    """(year, month) for a payroll call, from ?period= / ?month=&year= or a JSON body.
+
+    Every shape a person or the report builder can type is accepted - '2026-08', '2026/08', month 8,
+    month '8' - and anything else is a 400 that says what was expected instead of a 500 from int().
+    """
+    data, args = data or {}, args or request.args
+    raw = str(data.get("period") or args.get("period") or args.get("month") or "").strip()
+    year = data.get("year") or args.get("year")
+    year, month = (int(year) if str(year or "").isdigit() else None), None
+    if raw:
+        bits = [b for b in re.split(r"[^0-9]+", raw) if b]
+        if not bits:
+            raise ApiError("period must look like 2026-08 (or pass month 1-12 with a year)")
+        try:
+            numbers = [int(b) for b in bits]
+        except ValueError:
+            raise ApiError("period must look like 2026-08 (or pass month 1-12 with a year)")
+        if len(numbers) >= 2:
+            year, month = numbers[-2], numbers[-1]
+        elif len(numbers) == 1:
+            month = numbers[0]
+            if month > 31:                      # '202608' is a period someone pasted from a URL
+                year, month = month // 100, month % 100
+    if month is None and data.get("month") not in (None, ""):
+        month = int(money(data.get("month")))
+    if month is not None and not 1 <= month <= 12:
+        raise ApiError("month must be between 1 and 12")
+    if year is not None and not 2000 <= year <= 2100:
+        raise ApiError("year must be between 2000 and 2100")
+    if month is None:
+        raise ApiError("Pick the month you mean, for example 2026-08")
+    if year is None:
+        year = today().year
+    return year, month
+
+
+def month_end(year, month):
+    return date(year + (month == 12), month % 12 + 1, 1) - timedelta(days=1)
+
+
+def unpaid_leave_days(employee_id, year, month):
+    """ISO dates this person was on approved *paid* leave for, and those on approved unpaid leave.
+
+    Payroll needs both: unpaid days are loss of pay, paid days must not be counted as absences even
+    when attendance still says 'On Leave'.
+    """
+    types = {str(t.get("id")): t for t in db_list("leave_types")}
+    first, last = date(year, month, 1), month_end(year, month)
+    paid, unpaid = set(), set()
+    for req in db_list("leave_requests", {"employee_id": employee_id, "status": "Approved"}):
+        start, end = parse_day(req.get("start_date")), parse_day(req.get("end_date")) or parse_day(req.get("start_date"))
+        if not start:
+            continue
+        kind = types.get(str(req.get("leave_type_id"))) or {}
+        bucket = unpaid if kind and not kind.get("is_paid", True) else paid
+        day, stop = max(start, first), min(end or start, last)
+        while day <= stop:
+            bucket.add(day.isoformat())
+            day += timedelta(days=1)
+    return paid, unpaid
+
+
+def payroll_days(employee, year, month, through=None):
+    """Working, payable and lost days for one person-month, read from attendance.
+
+    Only Mon-Fri days that are not gazetted holidays count, and the window starts on the joining date
+    and stops on the exit date so a mid-month joiner is not paid (or docked) for days they were not
+    employed for. A missing punch is deliberately NOT loss of pay - that is what regularization is
+    for, and guessing against the employee is the wrong direction to err in.
+    """
+    first, last = date(year, month, 1), month_end(year, month)
+    off = {str(h.get("date"))[:10] for h in db_list("holidays") if str(h.get("date"))[:7] == f"{year:04d}-{month:02d}"}
+    working = [first + timedelta(days=i) for i in range((last - first).days + 1)
+               if (first + timedelta(days=i)).weekday() < 5 and (first + timedelta(days=i)).isoformat() not in off]
+    joining, exit_day = parse_day(employee.get("date_of_joining")), parse_day(employee.get("exit_date"))
+    if joining:
+        working = [d for d in working if d >= joining]
+    if exit_day:
+        working = [d for d in working if d <= exit_day]
+    if through:
+        working = [d for d in working if d <= through]
+    attendance = {str(a.get("date"))[:10]: a for a in db_list("attendance", {"employee_id": employee.get("id")})}
+    _, unpaid = unpaid_leave_days(employee.get("id"), year, month)
+    lop, lost = 0.0, []
+    for day in working:
+        row = attendance.get(day.isoformat())
+        if not row:
+            continue
+        status = str(row.get("status") or "").strip()
+        weight = LOP_WEIGHTS.get(status)
+        if weight is None and status == "On Leave" and day.isoformat() in unpaid:
+            weight = 1.0
+        if weight:
+            lop += weight
+            lost.append({"date": day.isoformat(), "label": fmt_day(day), "days": weight,
+                         "kind": status if status != "On Leave" else "Unpaid leave"})
+    return {"working_days": len(working), "lop_days": round(lop, 2),
+            "payable_days": round(len(working) - lop, 2), "lost_days": lost,
+            "holidays": len(off), "note": f"{len(working)} working day(s), {round(lop, 2)} lost"}
 
 
 def enrich_payslip(p):
     row = dict(p)
     row["employee"] = employee_display(row.get("employee_id"))
+    year, month = int(money(row.get("year"))), int(money(row.get("month")))
     try:
-        month_name = datetime.strptime(str(row.get("month")).zfill(2), "%m").strftime("%B")
+        month_name = datetime.strptime(str(month).zfill(2), "%m").strftime("%B")
     except (TypeError, ValueError):
         month_name = str(row.get("month"))
-    row["period_label"] = f"{month_name} {row.get('year')}"
+    row["period"] = row.get("period") or (f"{year:04d}-{month:02d}" if year and month else "")
+    row["period_label"] = f"{month_name} {year}"
     row["net_pay_label"] = inr(row.get("net_pay"))
     row["gross_earnings_label"] = inr(row.get("gross_earnings"))
     row["total_deductions_label"] = inr(row.get("total_deductions"))
+    row["bonus_label"] = inr(row.get("bonus")) if money(row.get("bonus")) else ""
     row["paid_on_label"] = fmt_day(row.get("paid_on") or row.get("generated_at"))
-    row["net_pct_of_gross"] = round(money(row.get("net_pay")) / money(row.get("gross_earnings")) * 100) if money(row.get("gross_earnings")) else 0
+    row["net_pct_of_gross"] = round(money(row.get("net_pay")) / money(row.get("gross_earnings")) * 100) \
+        if money(row.get("gross_earnings")) else 0
+    working, payable, lop = money(row.get("working_days")), money(row.get("payable_days")), money(row.get("lop_days"))
+    row["days_label"] = f"{payable:g} of {working:g} paid · {lop:g} LOP" if working else "—"
+    row["lop_days"] = round(lop, 2)
+    row["net_in_words"] = amount_in_words(row.get("net_pay"))
+    row["is_draft"] = str(row.get("status") or "Draft") == "Draft"
+    row["status_label"] = {"Draft": "Draft - not released", "Published": "Published", "Paid": "Paid"}.get(
+        str(row.get("status") or "Draft"), str(row.get("status") or "Draft"))
     return row
+
+
+def payslip_for(employee_id, year, month):
+    rows = db_list("payslips", {"employee_id": employee_id, "year": year, "month": month})
+    return rows[0] if rows else None
 
 
 def month_year_from_args():
     """Read the ?month=&year= pair shared by the payroll routes.
 
-    A bare month ('8') and the ISO shape ('2026-08', '2026/08') that the attendance and
-    report filters accept are both honoured, and anything unparseable is a 400 with a
-    sentence instead of a 500 - `int('2026-08')` used to crash both payroll endpoints.
-    Returns (year, month), either of which is None when that part was not supplied.
+    Kept for the two endpoints that already used it; `payroll_period` is the same reader with a
+    `period` shape and a body, which is what the run and the register use.
     """
     year_raw = (request.args.get("year") or "").strip()
     month = year = None
@@ -3026,14 +3277,26 @@ def month_year_from_args():
 @app.route("/api/payslips")
 def api_payslips():
     employee_id = scoped_employee_id()
-    filters = {} if not employee_id else {"employee_id": employee_id}
-    year, month = month_year_from_args()
+    # ?period=2026-09 is what the payroll screens hold on to; month/year stay for the older links
+    if request.args.get("period"):
+        year, month = payroll_period(args=request.args)
+    else:
+        year, month = month_year_from_args()
+    filters = dict({"employee_id": employee_id} if employee_id else {})
+    if year and month:      # `period` is a real column, so this is one equality test, not a scan
+        filters["period"] = f"{year:04d}-{month:02d}"
     rows = db_list("payslips", filters or None, order="year", descending=True)
-    if month:
-        rows = [r for r in rows if int(r.get("month") or 0) == month]
-    if year:
-        rows = [r for r in rows if int(r.get("year") or 0) == year]
-    return jsonify([enrich_payslip(r) for r in rows])
+    if month and not (year and month):
+        rows = [r for r in rows if int(money(r.get("month")) or 0) == month]
+    if year and not month:
+        rows = [r for r in rows if int(money(r.get("year")) or 0) == year]
+    if not employee_id and request.args.get("employee_id"):
+        rows = [r for r in rows if str(r.get("employee_id")) == str(request.args.get("employee_id")).strip()]
+    out = [enrich_payslip(r) for r in rows]
+    if not is_admin():
+        out = [r for r in out if str(r.get("status") or "Draft") != "Draft"]
+    return jsonify(sorted(out, key=lambda r: (str(r.get("period")), str((r.get("employee") or {}).get("full_name"))),
+                          reverse=True))
 
 
 @app.route("/api/payslips/<row_id>/detail")
@@ -3041,51 +3304,500 @@ def api_payslip_detail(row_id):
     slip = db_get("payslips", row_id)
     if not slip:
         raise ApiError("Payslip not found", 404)
+    slip = enrich_payslip(slip)
     if not is_admin() and str(slip.get("employee_id")) != str(acting_employee_id()):
         raise ApiError("You can only open your own payslips", 403)
-    structure = next((s for s in db_list("payroll_structures", {"employee_id": slip.get("employee_id")})), {})
-    payout = compute_payout(structure, extra_earnings=slip.get("bonus"), extra_deductions=slip.get("deductions"))
+    if slip.get("is_draft"):
+        raise ApiError("This payslip is still being prepared - HR will publish it for {period}".format(
+            period=slip.get("period_label") or "that month"), 404)
+    employee = employees_map().get(str(slip.get("employee_id"))) or {}
+    structure = current_structure(slip.get("employee_id"), on=f"{slip.get('period')}-28" if slip.get("period") else None)
+    year, month = int(money(slip.get("year"))), int(money(slip.get("month")))
+    if slip.get("period"):        # a slip stores the days it was built from; re-derive only when absent
+        days = {"working_days": money(slip.get("working_days")), "payable_days": money(slip.get("payable_days")),
+                "lop_days": money(slip.get("lop_days")), "lost_days": [], "note": ""}
+        if not days["working_days"]:
+            days = payroll_days(employee or {"id": slip.get("employee_id")}, year, month)
+    else:
+        days = payroll_days(employee or {"id": slip.get("employee_id")}, year, month)
+    payout = compute_payout(structure, extra_earnings=slip.get("bonus"), extra_deductions=slip.get("deductions"),
+                            paid_days=days["payable_days"] or 26, total_days=days["working_days"] or 26)
+    if money(slip.get("gross_earnings")):      # the stored slip is authoritative for published/paid periods
+        gross, deductions = money(slip.get("gross_earnings")), money(slip.get("total_deductions"))
+        net = money(slip.get("net_pay")) or round(gross - deductions, 2)
+    else:
+        gross, deductions, net = payout["gross"], payout["deductions_total"], payout["net"]
     leaves = [l for l in db_list("leave_requests", {"employee_id": slip.get("employee_id"), "status": "Approved"})
-              if str(l.get("start_date"))[:7] == f"{slip.get('year')}-{str(slip.get('month')).zfill(2)}"]
-    return jsonify({"payslip": enrich_payslip(slip), "structure": {**structure, "ctc_label": inr(structure.get("ctc")),
-                    "monthly_label": inr(money(structure.get("ctc")) / 12 if structure.get("ctc") else 0)},
+              if str(l.get("start_date"))[:7] == f"{year:04d}-{month:02d}"]
+    return jsonify({"payslip": slip, "structure": enrich_structure(structure, employee_display(slip.get("employee_id"))),
                     "earnings": payout["earnings"], "deductions": payout["deductions"],
-                    "gross": money(slip.get("gross_earnings")) or payout["gross"],
-                    "deductions_total": money(slip.get("total_deductions")) or payout["deductions_total"],
-                    "net": money(slip.get("net_pay")) or payout["net"],
+                    "gross": gross, "deductions_total": deductions, "net": net,
+                    "net_in_words": amount_in_words(net), "days": days,
+                    "lop_days": days["lop_days"], "payable_days": days["payable_days"],
+                    "working_days": days["working_days"], "period": slip.get("period"),
                     "leaves_in_period": [enrich_leave_row(l) for l in leaves],
+                    "bank": {"bank_name": employee.get("bank_name") or "—",
+                             "account": str(employee.get("bank_account_no") or "—")[-4:] and
+                                        "•••• " + str(employee.get("bank_account_no"))[-4:] or "—",
+                             "ifsc": employee.get("ifsc_code") or "—", "pan": employee.get("pan_no") or "—",
+                             "uan": employee.get("uan_no") or "—", "pf": employee.get("pf_no") or "—"},
                     "company": {"name": "Ekkaa Technologies Pvt. Ltd.", "gstin": "29AABCE1234F1Z5",
                                 "address": "Prestige Tech Park, Outer Ring Road, Bengaluru 560103"}})
 
 
 @app.route("/api/payroll/structures")
-@admin_required
 def api_payroll_structures():
+    """HR manages every structure; anyone signed in can read their own.
+
+    A GET for HR returns one row per employee, including the ones with no structure at all - the
+    screen has to be able to say 'no structure yet, add one' instead of the row disappearing, which
+    is what made this tab look empty.
+    """
+    if is_admin():
+        want = (request.args.get("employee_id") or "").strip()
+        only = (request.args.get("only") or "").strip().lower()
+        search = (request.args.get("q") or "").strip().lower()
+        people = [e for e in db_list("employees") if e.get("status") != "Exited"
+                  and (not want or str(e.get("id")) == want)
+                  and (not search or search in " ".join(str(e.get(f) or "") for f in
+                                                          ("full_name", "employee_code", "email")).lower())]
+        rows = []
+        for emp in sorted(people, key=lambda e: str(e.get("full_name") or "").lower()):
+            structure = current_structure(emp.get("id"))
+            if structure:
+                row = enrich_structure(structure, employee_display(emp.get("id")))
+                row["missing"] = False
+            else:
+                row = {"id": None, "missing": True, "employee": employee_display(emp.get("id")),
+                       "employee_name": emp.get("full_name"), "name": "—", "department": emp.get("department"),
+                       "earnings": [], "deductions": [], "allowances": {}, "monthly_gross": 0,
+                       "monthly_deductions": 0, "monthly_net": 0, "monthly": 0, "ctc": money(emp.get("salary_ctc")),
+                       "ctc_label": inr(emp.get("salary_ctc")), "derived_ctc": round(money(emp.get("salary_ctc")), 2),
+                       "ctc_drift": 0, "effective_from": None, "effective_from_label": "—", "form": {},
+                       "allowance_labels": "—", "monthly_gross_label": inr(0), "monthly_net_label": inr(0),
+                       "net_pct_of_gross": 0, "employer_pf": 0, "notes": ""}
+            if only == "missing" and not row["missing"]:
+                continue
+            if only == "present" and row["missing"]:
+                continue
+            rows.append(row)
+        return jsonify(rows)
+    mine = acting_employee_id()
+    if not mine:
+        raise ApiError("No employee profile is linked to this account", 403)
+    structure = current_structure(mine)
+    return jsonify([enrich_structure(structure)] if structure else [])
+
+
+def parse_structure_payload(data, employee=None, existing=None):
+    """Read, validate and normalise a structure form.
+
+    Components are monthly because that is what a payroll person thinks in; `ctc` is annual and is
+    derived from them. An explicit CTC is allowed only when it reconciles - accepting a figure no
+    combination of components can pay is how a payroll module starts disagreeing with itself.
+    """
+    def value(col):
+        """A field the form did not send keeps its stored value.
+
+        A PUT that re-sent only the two numbers someone nudged used to zero every other component -
+        allowances, employer PF, even the name - because the payload was built from the request alone.
+        """
+        return round(money(data.get(col)), 2) if col in data and data.get(col) is not None \
+            else round(money((existing or {}).get(col)), 2)
+
+    earn = {col: value(col) for col, _ in PAYROLL_EARNINGS}
+    ded = {col: value(col) for col, _ in PAYROLL_DEDUCTIONS}
+    for col, label in PAYROLL_EARNINGS + PAYROLL_DEDUCTIONS:
+        if money(data.get(col)) < 0:
+            raise ApiError(f"{label} cannot be negative")
+    allowances = {}
+    raw_allow = data["allowances"] if "allowances" in data else (existing or {}).get("allowances")
+    if isinstance(raw_allow, list):
+        raw_allow = {str(a.get("label") or "").strip(): a.get("amount") for a in raw_allow if isinstance(a, dict)}
+    if isinstance(raw_allow, dict):
+        for label, amount in raw_allow.items():
+            label = str(label).strip()[:40]
+            if not label:
+                continue
+            if money(amount) < 0:
+                raise ApiError(f"{label} cannot be negative")
+            allowances[label] = round(money(amount), 2)
+    employer_pf = value("employer_pf")
+    gross = round(sum(earn.values()) + sum(allowances.values()), 2)
+    if gross <= 0:
+        raise ApiError("Enter at least one earning component - basic, HRA, special allowance or an allowance")
+    if earn["hra"] > earn["basic"] > 0:
+        raise ApiError("HRA cannot be more than basic pay - it is a share of basic (40-50% is usual)")
+    total_ded = round(sum(ded.values()), 2)
+    if total_ded >= gross:
+        raise ApiError(f"Deductions of {inr(total_ded)} are not less than gross of {inr(gross)} - the net pay would not be positive")
+    if employer_pf < 0:
+        raise ApiError("Employer PF cannot be negative")
+    derived_ctc = round((gross + employer_pf) * 12, 2)
+    # CTC is a summary of the components, never a stored truth: an explicit figure is checked against
+    # them and the derived one is what gets written, so a PUT that only nudges basic does not inherit
+    # a now-wrong CTC from last time.
+    stated_ctc = round(money(data.get("ctc")), 2)
+    if stated_ctc and abs(stated_ctc - derived_ctc) > max(100.0, derived_ctc * 0.01):
+        raise ApiError(f"CTC {inr(stated_ctc)} does not match these components ({inr(derived_ctc)} a year from "
+                       f"{inr(gross)} a month plus {inr(employer_pf)} employer PF). Leave CTC blank to take the derived figure.")
+    name = str(data.get("name") or (existing or {}).get("name") or "Standard").strip()
+    if len(name) > 60:
+        raise ApiError("Structure name must be 60 characters or fewer")
+    effective = str(parse_day(data.get("effective_from")) or parse_day((existing or {}).get("effective_from"))
+                    or (employee or {}).get("date_of_joining") or today())
+    if parse_day(effective) and parse_day(effective) > today():
+        raise ApiError("A structure cannot start in the future - payroll would have nothing to pay from")
+    payload = {"employee_id": (employee or {}).get("id") or (existing or {}).get("employee_id"),
+               "name": name, "effective_from": effective, "ctc": derived_ctc, "employer_pf": employer_pf,
+               "allowances": allowances, **earn, **ded}
+    return payload, {"gross": gross, "deductions": total_ded, "net": round(gross - total_ded, 2),
+                     "derived_ctc": derived_ctc}
+
+
+@app.route("/api/payroll/structures", methods=["POST"])
+@admin_required
+def api_payroll_structure_create():
+    data = request.get_json(silent=True) or {}
+    emp_id = data.get("employee_id")
+    employee = employees_map().get(str(emp_id))
+    if not employee:
+        raise ApiError("Pick the employee this structure belongs to")
+    if employee.get("status") == "Exited":
+        raise ApiError(f"{employee.get('full_name')} has left - exited records keep the structure they were paid on")
+    name = str(data.get("name") or "Standard").strip()
+    clash = next((s for s in db_list("payroll_structures", {"employee_id": emp_id})
+                  if str(s.get("name") or "Standard").strip().lower() == name.lower()), None)
+    if clash:
+        raise ApiError(f"{employee.get('full_name')} already has a structure called {name} - edit that one, "
+                       "or give this revision a name like 'Revised FY26-27'")
+    payload, totals = parse_structure_payload(data, employee)
+    created = db_insert("payroll_structures", payload)
+    return jsonify({"success": True, "structure": enrich_structure(created),
+                    "message": f"Salary structure for {employee.get('full_name')} saved - "
+                               f"{inr(totals['gross'])} gross a month, {inr(totals['derived_ctc'])} CTC"})
+
+
+@app.route("/api/payroll/structures/<row_id>", methods=["PUT"])
+@admin_required
+def api_payroll_structure_update(row_id):
+    existing = db_get("payroll_structures", row_id)
+    if not existing:
+        raise ApiError("Structure not found", 404)
+    employee = employees_map().get(str(existing.get("employee_id"))) or {}
+    data = request.get_json(silent=True) or {}
+    name = str(data.get("name") or existing.get("name") or "Standard").strip()
+    clash = next((s for s in db_list("payroll_structures", {"employee_id": existing.get("employee_id")})
+                  if str(s.get("id")) != str(row_id)
+                  and str(s.get("name") or "Standard").strip().lower() == name.lower()), None)
+    if clash:
+        raise ApiError(f"That name is already used for {employee.get('full_name') or 'this employee'}")
+    payload, totals = parse_structure_payload(data, employee, existing)
+    updated = db_update("payroll_structures", row_id, payload)
+    return jsonify({"success": True, "structure": enrich_structure(updated),
+                    "message": f"Structure updated - {inr(totals['gross'])} gross a month, net {inr(totals['net'])}"})
+
+
+@app.route("/api/payroll/structures/<row_id>", methods=["DELETE"])
+@admin_required
+def api_payroll_structure_delete(row_id):
+    existing = db_get("payroll_structures", row_id)
+    if not existing:
+        raise ApiError("Structure not found", 404)
+    emp_id = existing.get("employee_id")
+    pending = [p for p in db_list("payslips", {"employee_id": emp_id}) if str(p.get("status") or "Draft") == "Draft"]
+    if pending:
+        raise ApiError(f"This structure backs {len(pending)} draft payslip(s) for that employee - publish, revoke "
+                       "or delete them first so nobody is paid from a structure that no longer exists")
+    db_delete("payroll_structures", row_id)
+    emp = employees_map().get(str(emp_id)) or {}
+    return jsonify({"success": True,
+                    "message": f"Structure removed for {emp.get('full_name') or 'that employee'} - "
+                               "their past payslips keep the numbers they were paid on"})
+
+
+def build_payslip_row(employee, structure, year, month, days, bonus=0.0, recovery=0.0, status="Draft",
+                      generated_by=None, notes=None):
+    """One payslip row from a structure + the days worked, so the run and the slip can never differ."""
+    payout = compute_payout(structure, extra_earnings=bonus, extra_deductions=recovery,
+                            paid_days=days["payable_days"] or 1, total_days=days["working_days"] or 26)
+    status = status if status in PAYROLL_STATUSES else "Draft"
+    return {"employee_id": employee.get("id"), "year": int(year), "month": int(month),
+            "period": f"{int(year):04d}-{int(month):02d}",
+            "gross_earnings": payout["gross"], "total_deductions": payout["deductions_total"],
+            "net_pay": payout["net"], "bonus": round(money(bonus), 2), "deductions": round(money(recovery), 2),
+            "lop_days": days["lop_days"], "payable_days": days["payable_days"],
+            "working_days": days["working_days"], "status": status,
+            "generated_at": str(today()), "generated_by": generated_by, "notes": (notes or "").strip()[:500] or None,
+            "published_at": str(today()) if status in ("Published", "Paid") else None,
+            "paid_on": str(today()) if status == "Paid" else None, "payslip_url": None}
+
+
+@app.route("/api/payroll/run", methods=["POST"])
+@admin_required
+def api_payroll_run():
+    """Generate (or re-generate) a month's payslips from structures + attendance.
+
+    Idempotent on (employee, period): a draft is rebuilt in place, and a slip already Published or
+    Paid is left alone unless `overwrite` is asked for, because re-running payroll after salaries went
+    out is how people end up paid twice.
+    """
+    data = request.get_json(silent=True) or {}
+    year, month = payroll_period(data)
+    if date(year, month, 1) > date(today().year, today().month, 1):
+        raise ApiError(f"{year}-{month:02d} has not started yet - payroll can only be run for a month in progress")
+    ids = {str(i) for i in (data.get("employee_ids") or []) if str(i).strip()}
+    status = "Published" if data.get("publish") else "Draft"
+    overwrite = bool(data.get("overwrite"))
+    actor = (session.get("user") or {}).get("email")
+    period = f"{year:04d}-{month:02d}"
+    created = updated = 0
+    kept, skipped = [], []
+    for emp in db_list("employees"):
+        if emp.get("status") == "Exited" or (ids and str(emp.get("id")) not in ids):
+            continue
+        structure = current_structure(emp.get("id"), on=str(month_end(year, month)))
+        if not structure:
+            skipped.append({"employee": emp.get("full_name"), "reason": "no salary structure"})
+            continue
+        joining = parse_day(emp.get("date_of_joining"))
+        if joining and joining > month_end(year, month):
+            skipped.append({"employee": emp.get("full_name"), "reason": f"joins on {fmt_day(joining)}"})
+            continue
+        days = payroll_days(emp, year, month, through=min(today(), month_end(year, month))
+                            if date(year, month, 1) <= date(today().year, today().month, 1) else None)
+        if not days["working_days"]:
+            skipped.append({"employee": emp.get("full_name"), "reason": "no working days in this period"})
+            continue
+        existing = payslip_for(emp.get("id"), year, month)
+        if existing and str(existing.get("status") or "Draft") != "Draft" and not overwrite:
+            kept.append({"employee": emp.get("full_name"), "status": existing.get("status")})
+            continue
+        bonus = money((existing or {}).get("bonus"))
+        recovery = money((existing or {}).get("deductions"))
+        row = build_payslip_row(emp, structure, year, month, days, bonus=bonus, recovery=recovery,
+                                status=status, generated_by=actor, notes=(existing or {}).get("notes"))
+        if existing:
+            db_update("payslips", existing["id"], row)
+            updated += 1
+        else:
+            db_insert("payslips", row)
+            created += 1
+    slips = [enrich_payslip(p) for p in db_list("payslips", {"period": period})]
+    total_net = round(sum(money(s.get("net_pay")) for s in slips), 2)
+    message = (f"Payroll for {datetime(year, month, 1).strftime('%B %Y')}: {created} generated, {updated} updated"
+               + (f", {len(kept)} already released and left alone" if kept else ""))
+    return jsonify({"success": True, "period": period, "year": year, "month": month, "status": status,
+                    "created": created, "updated": updated, "kept": kept, "skipped": skipped,
+                    "employees": len(slips), "net_payroll": total_net,
+                    "gross_payroll": round(sum(money(s.get("gross_earnings")) for s in slips), 2),
+                    "deductions": round(sum(money(s.get("total_deductions")) for s in slips), 2),
+                    "message": message,
+                    "next": "Review the drafts, then Publish them so employees can see their slips."
+                            if status == "Draft" else "Slips are published - mark the period paid once salaries go out."})
+
+
+@app.route("/api/payroll/publish", methods=["POST"])
+@admin_required
+def api_payroll_publish():
+    """Release a period's drafts to the employees it belongs to."""
+    data = request.get_json(silent=True) or {}
+    year, month = payroll_period(data)
+    period = f"{year:04d}-{month:02d}"
+    ids = {str(i) for i in (data.get("employee_ids") or []) if str(i).strip()}
+    changed = 0
+    for slip in db_list("payslips", {"period": period}):
+        if str(slip.get("status") or "Draft") != "Draft" or (ids and str(slip.get("employee_id")) not in ids):
+            continue
+        db_update("payslips", slip["id"], {"status": "Published", "published_at": str(today())})
+        changed += 1
+    if not changed:
+        raise ApiError(f"No draft payslips to publish for {datetime(year, month, 1).strftime('%B %Y')} - "
+                       "run payroll for that month first")
+    return jsonify({"success": True, "period": period, "published": changed,
+                    "message": f"{changed} payslip(s) for {datetime(year, month, 1).strftime('%B %Y')} published"})
+
+
+@app.route("/api/payroll/mark-paid", methods=["POST"])
+@admin_required
+def api_payroll_mark_paid():
+    """Close the loop: the bank transfer happened, so the period is Paid."""
+    data = request.get_json(silent=True) or {}
+    year, month = payroll_period(data)
+    period = f"{year:04d}-{month:02d}"
+    paid_on = str(parse_day(data.get("paid_on")) or today())
+    ids = {str(i) for i in (data.get("employee_ids") or []) if str(i).strip()}
+    changed = 0
+    for slip in db_list("payslips", {"period": period}):
+        emp_id = str(slip.get("employee_id"))
+        if ids and emp_id not in ids:
+            continue
+        if str(slip.get("status") or "") == "Paid":
+            continue
+        if str(slip.get("status") or "Draft") != "Published":
+            raise ApiError(f"{(employee_display(emp_id) or {}).get('full_name') or 'One employee'} is still on "
+                           f"{slip.get('status') or 'Draft'} - publish the period before marking it paid")
+        db_update("payslips", slip["id"], {"status": "Paid", "paid_on": paid_on})
+        changed += 1
+    if not changed:
+        raise ApiError(f"Nothing published to mark paid for {datetime(year, month, 1).strftime('%B %Y')}")
+    return jsonify({"success": True, "period": period, "paid": changed, "paid_on": paid_on,
+                    "message": f"{changed} payslip(s) marked paid on {fmt_day(paid_on)}"})
+
+
+@app.route("/api/payslips/<row_id>", methods=["PUT"])
+@admin_required
+def api_payslip_update(row_id):
+    """A single slip: bonus, recovery, a note, or its status - HR's correction before release."""
+    slip = db_get("payslips", row_id)
+    if not slip:
+        raise ApiError("Payslip not found", 404)
+    data = request.get_json(silent=True) or {}
+    status = str(data.get("status") or slip.get("status") or "Draft")
+    if status not in PAYROLL_STATUSES:
+        raise ApiError("Payslip status must be Draft, Published or Paid")
+    # The status and the paid-on date may move on a released slip (that is what marking it paid is);
+    # its money may not. Otherwise "publish, then quietly edit" would leave the employee holding a
+    # PDF that no longer matches the register.
+    released_as = str(slip.get("status") or "Draft")
+    if released_as != "Draft" and any(k in data for k in ("bonus", "deductions", "working_days", "payable_days")):
+        raise ApiError(f"This slip was already {released_as.lower()} - revoke it back to Draft before changing its "
+                       "amounts, so a payslip nobody re-reads does not move underneath the bank file")
+    employee = employees_map().get(str(slip.get("employee_id"))) or {}
+    structure = current_structure(slip.get("employee_id"))
+    year, month = int(money(slip.get("year"))), int(money(slip.get("month")))
+    bonus = money(data["bonus"]) if "bonus" in data else money(slip.get("bonus"))
+    recovery = money(data["deductions"]) if "deductions" in data else money(slip.get("deductions"))
+    if bonus < 0 or recovery < 0:
+        raise ApiError("Bonus and recovery cannot be negative")
+    days = {"working_days": money(slip.get("working_days")), "payable_days": money(slip.get("payable_days")),
+            "lop_days": money(slip.get("lop_days")), "lost_days": [], "note": ""}
+    if not days["working_days"]:
+        days = payroll_days(employee or {"id": slip.get("employee_id")}, year, month)
+    row = build_payslip_row(employee or {"id": slip.get("employee_id")}, structure, year, month, days,
+                            bonus=bonus, recovery=recovery, status=status,
+                            generated_by=slip.get("generated_by") or (session.get("user") or {}).get("email"),
+                            notes=data.get("notes") if "notes" in data else slip.get("notes"))
+    updated = db_update("payslips", row_id, row)
+    return jsonify({"success": True, "payslip": enrich_payslip(updated),
+                    "message": f"{(employee_display(slip.get('employee_id')) or {}).get('full_name') or 'Payslip'} "
+                               f"for {enrich_payslip(updated).get('period_label')}: net {inr(updated.get('net_pay'))}"})
+
+
+@app.route("/api/payslips/<row_id>/revoke", methods=["POST"])
+@admin_required
+def api_payslip_revoke(row_id):
+    """Pull a released slip back to Draft - with a reason, because someone may have been paid on it."""
+    slip = db_get("payslips", row_id)
+    if not slip:
+        raise ApiError("Payslip not found", 404)
+    if str(slip.get("status") or "Draft") == "Draft":
+        raise ApiError("That payslip is still a draft - edit it, or delete it from the register")
+    data = request.get_json(silent=True) or {}
+    reason = str(data.get("reason") or "").strip()
+    if len(reason) < 8:
+        raise ApiError("Say why in a few words - this slip is already in someone's hands")
+    updated = db_update("payslips", row_id, {"status": "Draft", "published_at": None, "paid_on": None,
+                                             "notes": (str(slip.get("notes") or "") + f"\n[revoked] {reason}").strip()[:500]})
+    return jsonify({"success": True, "payslip": enrich_payslip(updated),
+                    "message": "Back to draft - the employee can no longer open it"})
+
+
+@app.route("/api/payslips/<row_id>", methods=["DELETE"])
+@admin_required
+def api_payslip_delete(row_id):
+    slip = db_get("payslips", row_id)
+    if not slip:
+        raise ApiError("Payslip not found", 404)
+    if str(slip.get("status") or "Draft") != "Draft":
+        raise ApiError("Only drafts can be deleted - revoke it first, and say why")
+    db_delete("payslips", row_id)
+    return jsonify({"success": True, "message": "Draft payslip deleted"})
+
+
+def payroll_register(year, month):
+    """The month's line-by-line payroll, for the HR screen and the bank file."""
+    period = f"{int(year):04d}-{int(month):02d}"
     rows = []
-    for s in db_list("payroll_structures"):
-        emp = employee_display(s.get("employee_id"))
-        rows.append({**s, "employee": emp, "monthly": round(money(s.get("ctc")) / 12, 2),
-                     "ctc_label": inr(s.get("ctc")), "department": (emp or {}).get("department")})
-    return jsonify(rows)
+    for slip in db_list("payslips", {"period": period}):
+        emp = employee_display(slip.get("employee_id")) or {}
+        employee = employees_map().get(str(slip.get("employee_id"))) or {}
+        row = enrich_payslip(slip)
+        row.update({"department": emp.get("department"), "designation": emp.get("designation"),
+                    "bank_name": employee.get("bank_name") or "—", "bank_account_no": employee.get("bank_account_no") or "—",
+                    "ifsc_code": employee.get("ifsc_code") or "—", "pan_no": employee.get("pan_no") or "—",
+                    "uan_no": employee.get("uan_no") or "—", "structure": bool(current_structure(slip.get("employee_id")))})
+        rows.append(row)
+    rows.sort(key=lambda r: str((r.get("employee") or {}).get("full_name") or "").lower())
+    totals = {"gross": round(sum(money(r.get("gross_earnings")) for r in rows), 2),
+              "deductions": round(sum(money(r.get("total_deductions")) for r in rows), 2),
+              "net": round(sum(money(r.get("net_pay")) for r in rows), 2),
+              "bonus": round(sum(money(r.get("bonus")) for r in rows), 2),
+              "lop_days": round(sum(money(r.get("lop_days")) for r in rows), 2),
+              "employees": len(rows), "draft": len([r for r in rows if r.get("is_draft")]),
+              "published": len([r for r in rows if str(r.get("status")) == "Published"]),
+              "paid": len([r for r in rows if str(r.get("status")) == "Paid"])}
+    missing = [employee_display(e.get("id")) for e in db_list("employees")
+               if e.get("status") != "Exited" and not current_structure(e.get("id"), on=str(month_end(year, month)))]
+    return rows, totals, missing
+
+
+@app.route("/api/payroll/register")
+@admin_required
+def api_payroll_register():
+    year, month = payroll_period(args=request.args)
+    rows, totals, missing = payroll_register(year, month)
+    return jsonify({"period": f"{year:04d}-{month:02d}",
+                    "label": datetime(year, month, 1).strftime("%B %Y"), "rows": rows, "totals": totals,
+                    "structures_missing": [m for m in missing if m]})
+
+
+@app.route("/api/payroll/register/export")
+@admin_required
+def api_payroll_register_export():
+    """Bank-throw CSV: one row per person, the columns a salary file actually has."""
+    year, month = payroll_period(args=request.args)
+    rows, _totals, _missing = payroll_register(year, month)
+    out = [{"employee_code": (r.get("employee") or {}).get("employee_code"),
+            "employee": (r.get("employee") or {}).get("full_name"), "department": r.get("department"),
+            "designation": r.get("designation"), "month": r.get("period"), "working_days": r.get("working_days"),
+            "payable_days": r.get("payable_days"), "lop_days": r.get("lop_days"),
+            "bonus": r.get("bonus"), "gross": r.get("gross_earnings"), "deductions": r.get("total_deductions"),
+            "net_pay": r.get("net_pay"), "status": r.get("status"), "paid_on": r.get("paid_on"),
+            "bank_name": r.get("bank_name"), "account_no": r.get("bank_account_no"), "ifsc": r.get("ifsc_code"),
+            "pan": r.get("pan_no"), "uan": r.get("uan_no")} for r in rows]
+    columns = ["employee_code", "employee", "department", "designation", "month", "working_days", "payable_days",
+               "lop_days", "bonus", "gross", "deductions", "net_pay", "status", "paid_on", "bank_name",
+               "account_no", "ifsc", "pan", "uan"]
+    return csv_response(f"payroll_register_{year:04d}_{month:02d}", columns, out)
 
 
 @app.route("/api/payroll/summary")
 def api_payroll_summary():
     slips = db_list("payslips")
     scope = scoped_employee_id()
+    admin = is_admin()
     if scope:
         slips = [s for s in slips if str(s.get("employee_id")) == str(scope)]
-    arg_year, arg_month = month_year_from_args()
+    if request.args.get("period"):     # the payroll screens carry ?period=; keep both shapes in step
+        arg_year, arg_month = payroll_period(args=request.args)
+    else:
+        arg_year, arg_month = month_year_from_args()
     if not arg_month and not arg_year and slips:
-        year, month = max((int(s.get("year") or 0), int(s.get("month") or 0)) for s in slips)   # last processed period
+        year, month = max((int(money(s.get("year")) or 0), int(money(s.get("month")) or 0)) for s in slips)
     else:
         year = arg_year or today().year
         month = arg_month or today().month
-    rows = [s for s in slips if int(s.get("year") or 0) == year and int(s.get("month") or 0) == month]
+    period = f"{year:04d}-{month:02d}"
+    rows = [s for s in slips if str(s.get("period") or "") == period or
+             (int(money(s.get("year")) or 0) == year and int(money(s.get("month")) or 0) == month)]
+    if not admin:
+        rows = [s for s in rows if str(s.get("status") or "Draft") != "Draft"]
     structures = db_list("payroll_structures")
     by_employee = {str(s.get("employee_id")): s for s in structures}
     total_net = round(sum(money(s.get("net_pay")) for s in rows), 2)
     total_gross = round(sum(money(s.get("gross_earnings")) for s in rows), 2)
+    total_ded = round(sum(money(s.get("total_deductions")) for s in rows), 2)
     per_dept = {}
     for s in rows:
         emp = employees_map().get(str(s.get("employee_id")), {})
@@ -3093,20 +3805,36 @@ def api_payroll_summary():
         per_dept[dept] = round(per_dept.get(dept, 0) + money(s.get("net_pay")), 2)
     trend = []
     for m in range(1, 13):
-        subset = [s for s in slips if int(s.get("year") or 0) == year and int(s.get("month") or 0) == m]
-        trend.append({"month": datetime(2000, m, 1).strftime("%b"), "net": round(sum(money(s.get("net_pay")) for s in subset), 0),
-                      "count": len(subset)})
+        subset = [s for s in slips if int(money(s.get("year")) or 0) == year and int(money(s.get("month")) or 0) == m
+                  and (admin or str(s.get("status") or "Draft") != "Draft")]
+        trend.append({"month": datetime(2000, m, 1).strftime("%b"),
+                      "net": round(sum(money(s.get("net_pay")) for s in subset), 0), "count": len(subset)})
     monthly_cost = round(sum(money(s.get("ctc")) / 12 for s in structures), 2)
-    return jsonify({"period": f"{datetime(year, month, 1).strftime('%B %Y')}", "year": year, "month": month,
-                    "employees_paid": len(rows), "net_payroll": total_net, "gross_payroll": total_gross,
-                    "deductions": round(total_gross - total_net, 2), "average_net": round(total_net / len(rows), 2) if rows else 0,
-                    "monthly_ctc_cost": monthly_cost, "pending_slips": len([s for s in rows if s.get("status") != "Paid"]),
+    monthly_gross_cost = round(sum(structure_lines(s)[2] for s in structures), 2)
+    return jsonify({"period": datetime(year, month, 1).strftime("%B %Y"), "period_key": period,
+                    "year": year, "month": month, "employees_paid": len(rows), "net_payroll": total_net,
+                    "gross_payroll": total_gross, "deductions": total_ded,
+                    "average_net": round(total_net / len(rows), 2) if rows else 0,
+                    "monthly_ctc_cost": monthly_cost, "monthly_gross_cost": monthly_gross_cost,
+                    "structures_count": len(structures),
+                    "average_ctc": round(sum(money(s.get("ctc")) for s in structures) / len(structures), 2)
+                    if structures else 0,
+                    "pending_slips": len([s for s in rows if str(s.get("status") or "Draft") != "Paid"]),
+                    "draft_slips": len([s for s in rows if str(s.get("status") or "Draft") == "Draft"]),
+                    "published_slips": len([s for s in rows if str(s.get("status")) == "Published"]),
+                    "paid_slips": len([s for s in rows if str(s.get("status")) == "Paid"]),
+                    "lop_days": round(sum(money(s.get("lop_days")) for s in rows), 2),
+                    "bonus_paid": round(sum(money(s.get("bonus")) for s in rows), 2),
                     "per_department": per_dept, "trend": trend, "scoped": bool(scope),
+                    "my_structure": (enrich_structure(current_structure(scope)) if scope else None) or None,
                     "periods": [{"year": y, "month": m, "label": datetime(y, m, 1).strftime("%B %Y"),
-                                  "net": round(sum(money(s.get("net_pay")) for s in slips
-                                                   if int(s.get("year") or 0) == y and int(s.get("month") or 0) == m), 0),
-                                  "count": len([s for s in slips if int(s.get("year") or 0) == y and int(s.get("month") or 0) == m])}
-                                 for y, m in sorted({(int(s.get("year") or 0), int(s.get("month") or 0)) for s in slips}, reverse=True)[:12]],
+                                 "net": round(sum(money(s.get("net_pay")) for s in slips
+                                                  if int(money(s.get("year")) or 0) == y
+                                                  and int(money(s.get("month")) or 0) == m), 0),
+                                 "count": len([s for s in slips if int(money(s.get("year")) or 0) == y
+                                               and int(money(s.get("month")) or 0) == m])}
+                                for y, m in sorted({(int(money(s.get("year")) or 0), int(money(s.get("month")) or 0))
+                                                    for s in slips}, reverse=True)[:12]],
                     "structures_missing": ([] if scope else
                                            [employee_display(e.get("id")) for e in db_list("employees")
                                             if e.get("status") != "Exited" and str(e.get("id")) not in by_employee][:10])})
@@ -3424,12 +4152,15 @@ def api_candidate_hire(row_id):
                 "personal_email": row.get("personal_email") or cand.get("email"),
                 "phone": row.get("phone") or cand.get("phone"), "avatar": initials(name)})
     created = db_insert("employees", row)
-    db_insert("payroll_structures", {"employee_id": created["id"], "ctc": money(created.get("salary_ctc")),
-                                     "basic": round(money(created.get("salary_ctc")) * 0.4 / 12, 0),
-                                     "hra": round(money(created.get("salary_ctc")) * 0.16 / 12, 0),
-                                     "special_allowance": round(money(created.get("salary_ctc")) * 0.24 / 12, 0),
+    hire_ctc = money(created.get("salary_ctc"))
+    hire_basic = round(hire_ctc * 0.4 / 12, 0)
+    db_insert("payroll_structures", {"employee_id": created["id"], "ctc": hire_ctc, "name": "Standard",
+                                     "basic": hire_basic,
+                                     "hra": round(hire_ctc * 0.16 / 12, 0),
+                                     "special_allowance": round(hire_ctc * 0.24 / 12, 0),
                                      "pf": 1800, "esi": 78, "professional_tax": 200,
-                                     "tds": round(money(created.get("salary_ctc")) * 0.10 / 12, 0),
+                                     "employer_pf": round(hire_basic * 0.12, 2),
+                                     "tds": round(hire_ctc * 0.10 / 12, 0),
                                      "effective_from": str(joining)})
     seed_leave_balances(created)
     db_update("candidates", row_id, {"stage": "Hired", "converted_employee_id": created["id"],
