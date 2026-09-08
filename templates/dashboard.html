@@ -476,16 +476,21 @@
       <!-- ==================== PAYROLL ==================== -->
       <div id="module-payroll" class="module-section space-y-5">
         <div class="grid grid-cols-2 md:grid-cols-5 gap-4" id="payrollStats"></div>
+        <div id="payNotice"></div>
         <div class="keka-card p-5">
           <div class="flex flex-wrap items-center gap-3 mb-4">
-            <h3 class="font-display font-semibold text-[15px]">Payslips</h3>
+            <h3 class="font-display font-semibold text-[15px]">Payroll</h3>
             <select id="payMonth" class="field !w-[150px]" onchange="loadPayroll()"></select>
             <select id="payYear" class="field !w-[110px]" onchange="loadPayroll()"></select>
             <select id="payEmployee" class="field !w-[210px] hidden" onchange="loadPayroll()"></select>
-            <button data-admin-only onclick="loadPayroll()" class="btn btn-ghost btn-xs ml-auto"><i class="fas fa-sync-alt"></i> Refresh</button>
-            <div class="flex items-center gap-1 bg-[#f6f7fb] rounded-xl p-1"><div class="keka-tab active" data-paytab="slips" onclick="setPayTab('slips')">Payslips</div><div class="keka-tab" data-paytab="structures" data-admin-only onclick="setPayTab('structures')">Structures</div></div>
+            <button data-admin-only onclick="openPayrollRun()" class="btn btn-primary btn-xs"><i class="fas fa-play"></i> Run payroll</button>
+            <button data-admin-only onclick="publishPayroll()" class="btn btn-ghost btn-xs"><i class="fas fa-paper-plane"></i> Publish</button>
+            <button data-admin-only onclick="markPayrollPaid()" class="btn btn-ghost btn-xs"><i class="fas fa-circle-check"></i> Mark paid</button>
+            <a data-admin-only id="payRegisterCsv" href="#" class="btn btn-ghost btn-xs" title="One row per employee for the bank file"><i class="fas fa-file-csv"></i> Register CSV</a>
+            <button onclick="loadPayroll()" class="btn btn-ghost btn-xs ml-auto"><i class="fas fa-sync-alt"></i> Refresh</button>
+            <div class="flex items-center gap-1 bg-[#f6f7fb] rounded-xl p-1"><div class="keka-tab active" data-paytab="slips" onclick="setPayTab('slips')">Payslips</div><div class="keka-tab" id="payTabStructures" data-paytab="structures" onclick="setPayTab('structures')">Structures</div></div>
           </div>
-          <div class="sub-tab active" data-paypane="slips"><div class="overflow-x-auto"><table class="kt"><thead><tr><th>Period</th><th data-admin-only>Employee</th><th>Gross</th><th>Deductions</th><th>Net pay</th><th>Status</th><th>Paid on</th><th class="text-right">View</th></tr></thead><tbody id="payslipTable"></tbody></table></div></div>
+          <div class="sub-tab active" data-paypane="slips"><div class="overflow-x-auto"><table class="kt"><thead><tr><th>Period</th><th data-admin-only>Employee</th><th>Gross</th><th>Deductions</th><th>Net pay</th><th>Days</th><th>Status</th><th>Paid on</th><th class="text-right">View</th></tr></thead><tbody id="payslipTable"></tbody></table></div></div>
           <div class="sub-tab" data-paypane="structures"><div id="payrollStructures" class="overflow-x-auto"></div></div>
         </div>
       </div>
