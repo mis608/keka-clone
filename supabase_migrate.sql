@@ -190,6 +190,8 @@ create table if not exists attendance (
   employee_id uuid,
   is_late boolean not null default false,
   location text,
+  clock_in_location text,
+  clock_out_location text,
   note text,
   regularization_reason text,
   regularization_status text default 'None',
@@ -207,6 +209,8 @@ alter table attendance add column if not exists date date;  -- left nullable on 
 alter table attendance add column if not exists employee_id uuid;
 alter table attendance add column if not exists is_late boolean not null default false;
 alter table attendance add column if not exists location text;
+alter table attendance add column if not exists clock_in_location text;
+alter table attendance add column if not exists clock_out_location text;
 alter table attendance add column if not exists note text;
 alter table attendance add column if not exists regularization_reason text;
 alter table attendance add column if not exists regularization_status text;

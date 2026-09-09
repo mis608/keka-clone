@@ -4,6 +4,20 @@ re-derived from the code and from re-running the checks in §3 on 2026-09-08. No
 the previous revision of this file was destroyed by an editing accident (a write to the wrong
 path), so this is a reconstruction — the code, the SQL and the two test suites are the source of
 truth, not this document.
+22. Punch locations: every Clock in / Clock out records where the employee stood
+Attendance gained `clock_in_location` and `clock_out_location` (text, added to
+`SUPA_COLUMNS` and all three `.sql` files; `supabase_migrate.sql` also carries the
+`add column if not exists` lines for databases created before this change). Each cell holds a
+compact JSON pin - `{"lat": 28.6139, "lng": 77.209, "accuracy": 9.5, "address": "…"}` - produced
+by `punch_location_payload()` and read back by `parse_punch_location()`, which also swallows the
+old plain-text `location` values so every historical row keeps rendering. The Home tracker asks
+the browser for a one-shot position (`geoTag()` in app.js, W3C device-location API) and
+reverse-geocodes it best-effort through OSM Nominatim; a missing API, a denied permission or a
+timeout never blocks a punch - the server then records `{"address": "Office"}` exactly as before.
+Enriched rows now carry `clock_in_location_label / clock_out_location_label` plus
+`clock_in_lat / clock_in_lng / clock_in_map` (same for `out`), the Attendance table and the
+day-detail modal render both pins with a "view on map" link, the Home tracker shows
+"In: … / Out: …" under the status line, and the CSV export adds the two label columns.
 1. Data layer (the reason the rest could be honest)
 One access path. Every module reads and writes through `db_list / db_get / db_insert / db_update / db_delete`, which talk to Supabase (PostgREST) when `SUPABASE_URL` plus a key are
 configured and to the local demo store (`data/mock_store.json`) otherwise. `GET /api/health`

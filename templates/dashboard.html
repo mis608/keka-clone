@@ -240,6 +240,7 @@
               <div id="liveClock" class="text-[38px] font-display font-bold tracking-tight mt-3 num">--:--:--</div>
               <div id="liveDate" class="text-white/55 text-[12.5px]">—</div>
               <div id="clockStatus" class="bg-white/[0.07] rounded-xl p-3 flex items-center gap-2.5 mt-4 text-[13px]"><span class="tt-dot w-2 h-2 bg-white/40 rounded-full"></span><span id="clockStatusText" class="text-white/70">Loading…</span></div>
+              <div id="trackerLocLine" class="hidden text-white/45 text-[11.5px] mt-1.5 flex items-center gap-1.5 min-h-[1px]"><i class="fas fa-map-pin text-[12px] text-[#a89eff]"></i><span id="trackerLocText" class="truncate min-w-0">—</span></div>
               <div class="grid grid-cols-3 gap-2 mt-3" id="trackerStats"></div>
               <div class="grid grid-cols-2 gap-2 mt-4">
                 <button onclick="clockAction('in')" id="btnClockIn" class="btn btn-primary justify-center !bg-white !text-[#1e1f2b]">Clock in</button>
@@ -387,7 +388,7 @@
         </div>
         <div class="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3" id="attSummary"></div>
         <div class="sub-tab active" data-attpane="list">
-          <div class="keka-card overflow-hidden"><div class="overflow-x-auto" style="max-height:600px"><table class="kt"><thead><tr><th>Date</th><th data-admin-only>Employee</th><th>Clock in</th><th>Clock out</th><th>Worked</th><th>Break</th><th>Status</th><th>Location</th><th>Corrections</th><th class="text-right">Actions</th></tr></thead><tbody id="attendanceTable"></tbody></table></div></div>
+          <div class="keka-card overflow-hidden"><div class="overflow-x-auto" style="max-height:600px"><table class="kt"><thead><tr><th>Date</th><th data-admin-only>Employee</th><th>Clock in</th><th>Clock out</th><th>Worked</th><th>Break</th><th>Status</th><th>Punch locations</th><th>Corrections</th><th class="text-right">Actions</th></tr></thead><tbody id="attendanceTable"></tbody></table></div></div>
         </div>
         <div class="sub-tab" data-attpane="calendar">
           <div class="keka-card p-5">

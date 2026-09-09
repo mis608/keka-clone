@@ -409,7 +409,7 @@ function renderHomeKpis(s) {
     const t = s.my_time || {}, today0 = s.today || {}, hol = today0.next_holiday;
     $('#homeKpis').innerHTML = [
       kpiCard('My day', esc(t.status || 'Not clocked in'), t.clocked_in
-        ? `${(t.worked_hours || 0).toFixed(1)} h worked · in at ${esc(t.clock_in)}`
+        ? `${(t.worked_hours || 0).toFixed(1)} h worked · in at ${esc(t.clock_in)}${t.clock_in_location && t.clock_in_location !== 'Office' ? ` · ${esc(t.clock_in_location)}` : ''}`
         : esc(t.shift_label || 'Your shift'), { tone: /absent/i.test(t.status || '') ? 'bad' : 'good', onclick: "switchModule('attendance')" }),
       kpiCard('Waiting on approval', s.pending_total, `${s.pending_leaves} leave · ${s.pending_expenses} expenses · ${s.pending_documents} documents`,
         { tone: s.pending_total ? 'warn' : 'default', onclick: "switchModule('inbox')" }),
@@ -473,11 +473,60 @@ function renderTracker(t) {
     outBtn.textContent = t.clocked_out ? 'Clocked out' : 'Clock out';
   }
   $('#trackerShift') && ($('#trackerShift').textContent = t.shift_label || '');
+  // where the punches happened: GPS pins are surfaced here as well as in Attendance
+  const locLine = $('#trackerLocLine'), locTxt = $('#trackerLocText');
+  if (locLine && locTxt) {
+    const where = [];
+    if (t.clock_in_location) where.push(`In: ${t.clock_in_location}`);
+    if (t.clock_out_location) where.push(`Out: ${t.clock_out_location}`);
+    if (where.length) {
+      locLine.classList.remove('hidden');
+      locTxt.textContent = where.join(' · ');
+      locTxt.title = where.join(' · ');
+    } else locLine.classList.add('hidden');
+  }
+}
+
+/* ---------------------------- punch location (GPS) ---------------------------- */
+// Best-effort GPS pin captured on every Clock in / Clock out. The W3C "device location"
+// API (Chrome 130+) is the only browser-native way to get real coordinates; when it is
+// missing, permission is denied or the request times out, the punch simply has no pin
+// and the server records "Office" - nobody is ever blocked by a privacy prompt.
+function reverseGeo(lat, lng) {
+  const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}&zoom=16&accept-language=en`;
+  return Promise.race([
+    fetch(url).then(r => (r.ok ? r.json() : null)).then(j =>
+      (j && (j.display_name || (j.address && j.address.road)) || '').slice(0, 140) || null).catch(() => null),
+    new Promise(r => setTimeout(() => r(null), 3500)),
+  ]);
+}
+
+async function geoTag() {
+  if (!navigator.geolocation || typeof navigator.geolocation.getCurrentPosition !== 'function') return {};
+  try {
+    const pos = await Promise.race([
+      Promise.resolve(navigator.geolocation.getCurrentPosition({ timeout: 3000, maximumAge: 0, enableHighAccuracy: true }))
+        .catch(() => null),
+      new Promise(r => setTimeout(() => r(null), 3500)),
+    ]);
+    const la = Number(pos && pos.coords && pos.coords.latitude);
+    const lo = Number(pos && pos.coords && pos.coords.longitude);
+    if (!Number.isFinite(la) || !Number.isFinite(lo)) return {};
+    const out = { lat: la, lng: lo };
+    const acc = Number(pos.coords.accuracy);
+    if (Number.isFinite(acc)) out.accuracy = acc;
+    const addr = await reverseGeo(la, lo);
+    if (addr) out.address = addr;
+    return out;
+  } catch (e) {
+    return {};
+  }
 }
 
 async function clockAction(action) {
   try {
-    const res = await api('/api/attendance/clock', { method: 'POST', body: { action } });
+    const loc = await geoTag();
+    const res = await api('/api/attendance/clock', { method: 'POST', body: { action, ...loc } });
     toast(res.message, 'success');
     loadDashboard(true);
     if (currentModule === 'attendance') loadAttendance(true);
@@ -1395,6 +1444,30 @@ function renderAttSummary(s, regs) {
   $('#attSummary').innerHTML = cells + late;
 }
 function setAttView(v) { attView = v; $$('#module-attendance [data-attview]').forEach(x => x.classList.toggle('active', x.dataset.attview === v)); }
+/* Punch-location cells: compact "in / out" stacks for the attendance table and the
+   day-detail modal. Each side falls back to whatever the row knows - a GPS pin label,
+   the legacy free-text Location, or nothing. Map links are opened in a new tab. */
+function punchLocCell(a) {
+  const bit = (side) => {
+    const label = a[`clock_${side}_location_label`] || (side === 'in' ? a.location : '');
+    const link = a[`clock_${side}_map`];
+    if (!label && !link) return '';
+    const pin = link ? `<a href="${esc(link)}" target="_blank" rel="noopener" title="View on map" class="text-[#584ac0] ml-0.5"><i class="fas fa-map-marked-alt text-[10px]"></i></a>` : '';
+    return `<div class="flex items-center gap-1 ${side === 'in' ? 'text-[#0f9d58]' : 'text-[#b7791f]'}"><span class="uppercase text-[9.5px] text-[#8b8fa3]">${side}·</span><span class="truncate min-w-0" title="${esc(label)}">${esc(label || '—')}</span>${pin}</div>`;
+  };
+  const body = bit('in') + bit('out');
+  return body || '<span class="text-[#c9ccdb]">—</span>';
+}
+function punchLocDetail(rec) {
+  const bit = (side) => {
+    const label = rec[`clock_${side}_location_label`] || (side === 'in' ? rec.location : '');
+    const link = rec[`clock_${side}_map`];
+    if (!label && !link) return `<span class="uppercase text-[10px] text-[#8b8fa3]">${side}</span> —`;
+    const m = link ? ` · <a href="${esc(link)}" target="_blank" rel="noopener" class="text-[#584ac0] underline">map</a>` : '';
+    return `<span class="uppercase text-[10px] text-[#8b8fa3]">${side}</span> ${esc(label)}${m}`;
+  };
+  return `${bit('in')}<br>${bit('out')}`;
+}
 function renderAttendanceTable() {
   const status = $('#attStatusFilter').value;
   let rows = attRowsCache;
@@ -1412,7 +1485,7 @@ function renderAttendanceTable() {
     <td class="num font-medium">${esc(a.worked_label)}</td>
     <td class="num text-[12px] text-[#6b7085]">${num(a.break_minutes) || '—'}</td>
     <td>${statusPill(a.status)}</td>
-    <td class="text-[12.5px]">${esc(a.location || '—')}</td>
+    <td class="text-[12.5px]">${punchLocCell(a)}</td>
     <td class="text-[12px]">${a.regularization_status && a.regularization_status !== 'None' ? statusPill(a.regularization_status) : '<span class="text-[#c9ccdb]">—</span>'}</td>
     <td class="text-right"><div class="row-actions inline-flex gap-1">
       <button onclick="event.stopPropagation();openRegularizeForm('${a.date}','${a.employee_id}')" class="btn btn-ghost btn-xs !py-1" title="Request a correction"><i class="fas fa-pen-to-square"></i> Regularize</button>
@@ -1451,7 +1524,7 @@ function openDayDetail(day, empId) {
   if (!rec) { toast('No record on that day', 'info'); return; }
   const info = (l, v) => `<div class="bg-[#f6f7fb] rounded-xl p-3"><div class="text-[10.5px] uppercase tracking-widest text-[#8b8fa3] font-semibold">${l}</div><div class="text-[13.5px] font-medium mt-1 num">${v || '—'}</div></div>`;
   openModal(fmtDate(day, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }),
-    `<div class="grid grid-cols-2 md:grid-cols-4 gap-3">${info('Employee', esc(rec.employee_name))}${info('Clock in', esc(rec.clock_in_label))}${info('Clock out', esc(rec.clock_out_label))}${info('Worked', esc(rec.worked_label))}${info('Break', num(rec.break_minutes) + ' min')}${info('Status', statusPill(rec.status))}${info('Location', esc(rec.location || '—'))}${info('Correction', statusPill(rec.regularization_status))}</div>${rec.note ? `<div class="mt-3 text-[12.5px] text-[#6b7085] bg-[#fff4e6] rounded-xl p-3"><b>Note:</b> ${esc(rec.note)}</div>` : ''}`,
+    `<div class="grid grid-cols-2 md:grid-cols-4 gap-3">${info('Employee', esc(rec.employee_name))}${info('Clock in', esc(rec.clock_in_label))}${info('Clock out', esc(rec.clock_out_label))}${info('Worked', esc(rec.worked_label))}${info('Break', num(rec.break_minutes) + ' min')}${info('Status', statusPill(rec.status))}${info('Punch locations', punchLocDetail(rec))}${info('Correction', statusPill(rec.regularization_status))}</div>${rec.note ? `<div class="mt-3 text-[12.5px] text-[#6b7085] bg-[#fff4e6] rounded-xl p-3"><b>Note:</b> ${esc(rec.note)}</div>` : ''}`,
     `<button onclick="openRegularizeForm('${day}','${rec.employee_id}');closeAllModals()" class="btn btn-ghost mr-auto"><i class="fas fa-pen-to-square"></i> Request a correction</button>${isAdmin() ? `<button onclick="openManualAttendance('${rec.employee_id}','${day}');closeAllModals()" class="btn btn-primary btn-xs"><i class="far fa-edit"></i> Edit record</button>` : ''}<button onclick="closeAllModals()" class="btn btn-ghost">Close</button>`);
 }
 function renderRegPanel(regs) {

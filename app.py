@@ -113,7 +113,8 @@ SUPA_COLUMNS = {
                   "password_hash",
                   "exit_date", "exit_reason"},
     "attendance": {"employee_id", "date", "clock_in", "clock_out", "work_hours", "break_minutes", "status",
-                   "shift_id", "location", "note", "is_late", "regularization_status", "regularization_reason"},
+                   "shift_id", "location", "note", "is_late", "regularization_status", "regularization_reason",
+                   "clock_in_location", "clock_out_location"},
     "attendance_regularizations": {"employee_id", "date", "request_type", "clock_in_correction",
                                    "clock_out_correction", "reason", "status", "reviewer_id", "reviewed_at",
                                    "reviewer_remark", "requested_at" },
@@ -1175,6 +1176,8 @@ def api_stats():
         "shift_label": f"{shift.get('name', 'General Shift')} • {fmt_time(shift.get('start_time'))} - {fmt_time(shift.get('end_time'))}",
         "record_id": (mine or {}).get("id"),
         "regularization_status": (mine or {}).get("regularization_status") or "None",
+        "clock_in_location": parse_punch_location((mine or {}).get("clock_in_location"))["label"],
+        "clock_out_location": parse_punch_location((mine or {}).get("clock_out_location"))["label"],
     }
 
     holidays = sorted([h for h in db_list("holidays") if (parse_day(h.get("date")) or day) >= day], key=lambda x: str(x.get("date")))
@@ -2132,6 +2135,71 @@ def month_bounds(month_str):
     return first, nxt - timedelta(days=1)
 
 
+# ------------------------------------------------- punch location (GPS on clock in/out)
+# Every punch captures where the employee was standing. The browser asks for a one-shot
+# GPS pin (W3C device-location API) and reverse-geocodes it; the JSON below is what gets
+# persisted in attendance.clock_in_location / attendance.clock_out_location, so a cell is:
+#   {"lat": 28.6139, "lng": 77.209, "accuracy": 9.5, "address": "Connaught Place, New Delhi"}
+# and a punch with no pin is simply {"address": "Office"}.
+def punch_location_payload(latitude=None, longitude=None, accuracy=None, address=None, typed=None):
+    """Normalize one punch's location fields into the JSON string stored on the row."""
+    lat = lng = None
+    try:
+        lat = float(latitude) if latitude not in (None, "") else None
+        lng = float(longitude) if longitude not in (None, "") else None
+    except (TypeError, ValueError):
+        lat = lng = None
+    if lat is not None and not -90 <= lat <= 90:
+        lat = None
+    if lng is not None and not -180 <= lng <= 180:
+        lng = None
+    if typed and str(typed).strip():                       # the old free-text Location box wins
+        return json.dumps({"address": str(typed).strip()[:140]})
+    if lat is None or lng is None:                          # no pin: never block a punch
+        return json.dumps({"address": "Office"})
+    obj = {"lat": round(lat, 6), "lng": round(lng, 6)}
+    try:
+        if accuracy not in (None, ""):
+            obj["accuracy"] = round(float(accuracy), 1)
+    except (TypeError, ValueError):
+        pass
+    if address and str(address).strip():
+        obj["address"] = str(address).strip()[:140]
+    return json.dumps(obj, separators=(",", ":"))
+
+
+def parse_punch_location(raw):
+    """Read a stored punch-location cell back and answer with a friendly label + map bits.
+
+    Falls back gracefully: plain legacy text ("Delhi office") and anything unparseable
+    are treated as an address with no coordinates.
+    """
+    obj = None
+    if isinstance(raw, str) and raw.strip():
+        try:
+            obj = json.loads(raw) if raw.strip().startswith(("{", "[")) else None
+        except ValueError:
+            obj = None
+        if obj is None:
+            obj = {"address": raw.strip()}
+    elif isinstance(raw, dict):
+        obj = dict(raw)
+    if not isinstance(obj, dict):
+        return {"label": None, "address": None, "lat": None, "lng": None, "accuracy": None}
+    try:
+        lat = float(obj["lat"]) if obj.get("lat") not in (None, "") else None
+        lng = float(obj["lng"]) if obj.get("lng") not in (None, "") else None
+        accuracy = float(obj["accuracy"]) if obj.get("accuracy") not in (None, "") else None
+    except (TypeError, ValueError):
+        lat = lng = accuracy = None
+    address = str(obj.get("address") or "").strip() or None
+    if lat is not None and lng is not None:
+        label = address or f"{lat:.5f}, {lng:.5f}"
+    else:
+        label = address or (None if not obj.get("address") else "Office")
+    return {"label": label or None, "address": address, "lat": lat, "lng": lng, "accuracy": accuracy}
+
+
 def enrich_attendance_row(a, employees=None):
     row = dict(a)
     emp = (employees or employees_map()).get(str(row.get("employee_id"))) or {}
@@ -2149,6 +2217,18 @@ def enrich_attendance_row(a, employees=None):
         hours = money(row.get("work_hours"))
         row["worked_label"] = f"{hours:.1f} h" if hours else "-"
     row["regularization_status"] = row.get("regularization_status") or "None"
+    for side, key in (("in", "clock_in_location"), ("out", "clock_out_location")):
+        loc = parse_punch_location(row.get(key))
+        row[f"clock_{side}_location_label"] = loc["label"]
+        row[f"clock_{side}_lat"] = loc["lat"]
+        row[f"clock_{side}_lng"] = loc["lng"]
+        row[f"clock_{side}_accuracy"] = loc["accuracy"]
+        row[f"clock_{side}_map"] = (
+            f"https://maps.google.com/?q={loc['lat']:.6f},{loc['lng']:.6f}" if loc["lat"] is not None else None
+        )
+    # the single Location column keeps a readable value for older rows / CSV / HR entries
+    if not row.get("location") and row.get("clock_in_location"):
+        row["location"] = parse_punch_location(row.get("clock_in_location"))["label"] or "Office"
     return row
 
 
@@ -2240,10 +2320,17 @@ def api_attendance_clock():
             raise ApiError(f"Today is already closed - in {fmt_time(ci)}, out {fmt_time(co)}. "
                            "If a punch is wrong, use Attendance -> Regularization or ask HR to edit the record.")
         late = (now.hour * 60 + now.minute) > (minutes_of(shift.get("start_time")) or 570) + grace
+        # every punch pins where the employee stood: GPS from the browser (or a typed location)
+        loc_in = punch_location_payload(data.get("lat"), data.get("lng"),
+                                        data.get("accuracy"), data.get("address"),
+                                        typed=data.get("location"))
+        loc_in_label = parse_punch_location(loc_in)["label"] or "Office"
         payload = {"employee_id": employee_id, "date": today_s, "clock_in": stamp,
-                   "status": "Present", "is_late": bool(late), "location": data.get("location") or "Office",
+                   "status": "Present", "is_late": bool(late), "location": loc_in_label,
+                   "clock_in_location": loc_in,
                    "shift_id": shift.get("id"), "break_minutes": 0, "work_hours": 0,
-                   "note": "Self clock-in" if not data.get("location") else f"Clock-in from {data.get('location')}"}
+                   "note": "Self clock-in" if (loc_in_label == "Office" and not data.get("location"))
+                           else f"Clock-in from {loc_in_label}"}
         if broken:
             payload["clock_out"] = None
             payload["note"] = "Reopened: the recorded clock-out was before the clock-in"
@@ -2262,8 +2349,12 @@ def api_attendance_clock():
         end = max(now.hour * 60 + now.minute, start)
         brk = int(money(existing.get("break_minutes") or 45))
         hours = round(max(money(existing.get("work_hours")), (end - start - brk) / 60), 2)
+        loc_out = punch_location_payload(data.get("lat"), data.get("lng"),
+                                         data.get("accuracy"), data.get("address"),
+                                         typed=data.get("location"))
         row = db_update("attendance", existing["id"], {"clock_out": stamp, "work_hours": hours,
-                                                       "status": "Present" if hours >= 4 else "Half Day"})
+                                                       "status": "Present" if hours >= 4 else "Half Day",
+                                                       "clock_out_location": loc_out})
         return jsonify({"success": True, "action": "out", "time": fmt_time(stamp), "hours": hours,
                         "attendance": enrich_attendance_row(row),
                         "message": f"Clocked out at {fmt_time(stamp)} - {hours:.1f} hours worked today"})
@@ -5285,7 +5376,8 @@ def api_export(module):
     if module == "attendance":
         rows = own([enrich_attendance_row(a) for a in db_list("attendance")])
         return csv_response("attendance", ["employee_name", "employee_code", "date", "clock_in_label", "clock_out_label",
-                                           "work_hours", "status", "location", "regularization_status"], rows)
+                                           "work_hours", "status", "location", "clock_in_location_label",
+                                           "clock_out_location_label", "regularization_status"], rows)
     if module == "leave":
         rows = own([enrich_leave_row(l) for l in db_list("leave_requests")])
         return csv_response("leave_requests", ["employee_name", "leave_type_label", "start_date", "end_date", "days",

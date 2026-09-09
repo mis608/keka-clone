@@ -197,6 +197,8 @@ create table if not exists attendance (
   employee_id uuid,
   is_late boolean not null default false,
   location text,
+  clock_in_location text,
+  clock_out_location text,
   note text,
   regularization_reason text,
   regularization_status text default 'None',
