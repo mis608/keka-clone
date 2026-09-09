@@ -1986,6 +1986,22 @@ def api_document_update(row_id):
             raise ApiError("You can only remove your own documents", 403)
         if doc.get("status") == "Verified" and not is_admin():
             raise ApiError("A verified document is part of the official record - contact HR to replace it", 403)
+        # Remove the stored file too, not just the metadata row. The file may live in
+        # Supabase Storage (cloud mode) or on the local disk (local mode) depending on
+        # which storage was active when it was uploaded - clean up wherever it is.
+        target = doc.get("file_url")
+        if target:
+            local_path = os.path.join(UPLOAD_DIR, target)
+            if supabase and SUPABASE_BUCKET and not os.path.exists(local_path):
+                try:
+                    supabase.storage.from_(SUPABASE_BUCKET).remove([target])
+                except Exception as exc:                                      # noqa: BLE001
+                    print(f"[document delete] could not remove {target} from storage: {exc}")
+            elif os.path.exists(local_path):
+                try:
+                    os.remove(local_path)
+                except OSError as exc:                                        # noqa: BLE001
+                    print(f"[document delete] could not remove local file {local_path}: {exc}")
         db_delete("documents", row_id)
         return jsonify({"success": True, "message": "Document removed"})
     if not is_admin():
