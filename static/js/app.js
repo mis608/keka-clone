@@ -757,6 +757,33 @@ async function confirmDeleteEmployee(id, name) {
     async () => { const r = await api('/api/employees/' + id, { method: 'DELETE' }); toast(r.message, 'success'); loadEmployees(true); }, 'Remove employee');
 }
 
+/* Type-or-add fields: a text box with datalist suggestions for designation/department.
+   Picking an existing name links it; typing a new one creates it through the admin-only
+   create APIs when the form is saved (the server dedupes case-insensitive matches). */
+function typeOrAddField(lbl, id, names, hint, value) {
+  const opts = (names || []).map(n => `<option value="${esc(n)}">`).join('');
+  return `<div><div class="lbl">${lbl}</div><input id="${id}" class="field" list="${id}List" autocomplete="off" placeholder="Unassigned - type to pick or add" value="${esc(value || '')}"><datalist id="${id}List">${opts}</datalist><div class="text-[11px] text-[#94a3b8] mt-1">${hint}</div></div>`;
+}
+async function resolveTypeOrAdd(kind, inputId, departmentId) {
+  const el = document.getElementById(inputId);
+  const typed = el ? el.value.trim() : '';
+  if (!typed) return null;
+  const lower = typed.toLowerCase();
+  if (kind === 'designation') {
+    const match = (APP.lookups.designations || []).find(d => String(d.title || '').trim().toLowerCase() === lower);
+    if (match) return match.id;
+    const r = await api('/api/designations', { method: 'POST', body: { title: typed, department_id: departmentId || null } });
+    toast(r.message, 'success');
+    APP.lookups = null; await loadLookups(true);
+    return r.designation.id;
+  }
+  const match = (APP.lookups.departments || []).find(d => String(d.name || '').trim().toLowerCase() === lower);
+  if (match) return match.id;
+  const r = await api('/api/departments', { method: 'POST', body: { name: typed } });
+  toast(r.message, 'success');
+  APP.lookups = null; await loadLookups(true);
+  return r.department.id;
+}
 async function openEmployeeForm(id) {
   await loadLookups();
   let e = {};
@@ -769,7 +796,7 @@ async function openEmployeeForm(id) {
     ${grid('md:grid-cols-3 gap-3', [f('Full name', 'full_name', { required: true }), f('Work email', 'email', { required: true, type: 'email' }), f('Personal email', 'personal_email', { type: 'email' })].join(''))}
     ${grid('md:grid-cols-3 gap-3', [f('Phone', 'phone'), f('Employee code', 'employee_code', { placeholder: 'auto-generated' }), f('Gender', 'gender', { type: 'select', options: ['Male', 'Female', 'Other'], placeholder: 'Select' })].join(''))}
     ${grid('md:grid-cols-3 gap-3', [f('Date of birth', 'date_of_birth', { type: 'date' }), f('Date of joining', 'date_of_joining', { type: 'date' }), f('Blood group', 'blood_group', { type: 'select', options: ['A+', 'A-', 'B+', 'B-', 'O+', 'O-', 'AB+', 'AB-'], placeholder: 'Select' })].join(''))}
-    ${grid('md:grid-cols-3 gap-3', [f('Department', 'department_id', { type: 'select', options: depts, placeholder: 'Unassigned' }), `<div><div class="lbl">Designation</div><input id="designation_name" class="field" list="desigOptions" autocomplete="off" placeholder="Unassigned - type to pick or add" value="${esc((e.designation_id && desigName(e.designation_id) !== '—') ? desigName(e.designation_id) : '')}"><datalist id="desigOptions">${desigs.map(d => `<option value="${esc(d.label)}">`).join('')}</datalist><div class="text-[11px] text-[#94a3b8] mt-1">Pick an existing title or type a new one - it is added to the list when you save.</div></div>`, f('Reports to', 'manager_id', { type: 'select', options: mgrs, placeholder: 'No manager' })].join(''))}
+    ${grid('md:grid-cols-3 gap-3', [typeOrAddField('Department', 'department_name', depts.map(d => d.label), 'Pick an existing department or type a new one - it is created when you save.', deptName(e.department_id) !== '—' ? deptName(e.department_id) : ''), typeOrAddField('Designation', 'designation_name', desigs.map(d => d.label), 'Pick an existing title or type a new one - it is added to the list when you save.', (e.designation_id && desigName(e.designation_id) !== '—') ? desigName(e.designation_id) : ''), f('Reports to', 'manager_id', { type: 'select', options: mgrs, placeholder: 'No manager' })].join(''))}
     ${grid('md:grid-cols-4 gap-3', [f('Employment type', 'employment_type', { type: 'select', options: ['Full-time', 'Part-time', 'Contract', 'Intern'], placeholder: 'Full-time' }), f('Work location', 'work_location', { placeholder: 'Bengaluru' }), f('Annual CTC', 'salary_ctc', { type: 'number', step: 1000 }), f('Status', 'status', { type: 'select', options: ['Active', 'On Leave', 'Notice Period', 'Exited'], placeholder: 'Active' })].join(''))}
     ${grid('md:grid-cols-2 gap-3', [f('Address', 'address'), f('Nationality', 'nationality', { placeholder: 'Indian' })].join(''))}
     <details ${e.pan_no || e.bank_account_no ? 'open' : ''} class="border border-[#f1f5f9] rounded-xl p-3"><summary class="text-[12.5px] font-semibold cursor-pointer text-[#15803d]">Statutory & bank details</summary>
@@ -792,18 +819,10 @@ async function submitEmployeeForm(id) {
   ['department_id', 'designation_id', 'manager_id'].forEach(k => { if (!v[k]) delete v[k]; });
   Object.keys(v).forEach(k => { if (v[k] === null || v[k] === '') delete v[k]; });
   try {
-    const typedDesig = ($('#designation_name') ? $('#designation_name').value : '').trim();
-    if (typedDesig) {
-      const match = (APP.lookups.designations || []).find(d => String(d.title || '').trim().toLowerCase() === typedDesig.toLowerCase());
-      if (match) {
-        v.designation_id = match.id;
-      } else {
-        const created = await api('/api/designations', { method: 'POST', body: { title: typedDesig, department_id: v.department_id || null } });
-        v.designation_id = created.designation.id;
-        toast(created.message, 'success');
-        APP.lookups = null; await loadLookups(true);
-      }
-    }
+    const newDeptId = await resolveTypeOrAdd('department', 'department_name');
+    if (newDeptId) v.department_id = newDeptId;
+    const desigId = await resolveTypeOrAdd('designation', 'designation_name', newDeptId);
+    if (desigId) v.designation_id = desigId;
     const res = id ? await api('/api/employees/' + id, { method: 'PUT', body: v }) : await api('/api/employees', { method: 'POST', body: v });
     toast(res.message, 'success'); closeAllModals();
     APP.lookups = null; await loadLookups(true);
@@ -906,8 +925,8 @@ function openMeEdit() {
         if (k === 'salary_ctc') opts.type = 'number';
         if (k === 'personal_email' || k === 'email') opts.type = 'email';
         if (k === 'address') opts.type = 'textarea';
-        if (k === 'department_id') return fieldRow(labels[k], k, e.department_id, { type: 'select', options: (APP.lookups.departments || []).map(d => ({ value: d.id, label: d.name })), placeholder: 'Unassigned' });
-        if (k === 'designation_id') return fieldRow(labels[k], k, e.designation_id, { type: 'select', options: (APP.lookups.designations || []).map(d => ({ value: d.id, label: d.title })), placeholder: 'Unassigned' });
+        if (k === 'department_id') return typeOrAddField(labels[k], 'department_name', (APP.lookups.departments || []).map(d => d.name), 'Pick an existing department or type a new one - it is created when you save.', deptName(e.department_id) !== '—' ? deptName(e.department_id) : '');
+        if (k === 'designation_id') return typeOrAddField(labels[k], 'designation_name', (APP.lookups.designations || []).map(d => d.title), 'Pick an existing title or type a new one - it is added to the list when you save.', desigName(e.designation_id) !== '—' ? desigName(e.designation_id) : '');
         if (k === 'manager_id') return fieldRow(labels[k], k, e.manager_id, { type: 'select', options: (APP.lookups.employees || []).filter(x => String(x.id) !== String(e.id)).map(x => ({ value: x.id, label: x.full_name })), placeholder: 'No manager' });
         if (k === 'employment_type') opts.type = 'select'; opts.options = ['Full-time', 'Part-time', 'Contract', 'Intern'];
         if (k === 'status') opts.type = 'select'; opts.options = ['Active', 'On Leave', 'Notice Period', 'Exited'];
@@ -920,13 +939,21 @@ function openMeEdit() {
   openModal('Edit my profile', body, modalFootSave('submitMeEdit(' + (isAdminUser ? 'true' : 'false') + ')', 'Save changes'));
 }
 async function submitMeEdit(admin) {
-  const ids = $$('#modalBody [id]').map(el => el.id);
+  const ids = $$('#modalBody [id]').map(el => el.id).filter(id => !id.endsWith('List') && id !== 'department_name' && id !== 'designation_name');
   const all = formValues(ids);
   const allowed = admin ? null : (APP.me.editable_fields || []);
   const body = {};
   Object.entries(all).forEach(([k, v]) => { if (!allowed || allowed.includes(k)) body[k] = v === null ? '' : v; });
   if (!Object.keys(body).length) { toast('Nothing to save', 'warn'); return; }
-  try { const r = await api('/api/me', { method: 'PUT', body }); toast(r.message || 'Profile updated', 'success'); closeAllModals(); await loadMe(true); APP.lookups = null; loadLookups(true); } catch (e) { }
+  try {
+    if (admin) {
+      const deptId = await resolveTypeOrAdd('department', 'department_name');
+      if (deptId) body.department_id = deptId;
+      const desigId = await resolveTypeOrAdd('designation', 'designation_name', deptId);
+      if (desigId) body.designation_id = desigId;
+    }
+    const r = await api('/api/me', { method: 'PUT', body }); toast(r.message || 'Profile updated', 'success'); closeAllModals(); await loadMe(true); APP.lookups = null; loadLookups(true);
+  } catch (e) { }
 }
 
 /* ================================================================== ORG CHART */
@@ -2663,7 +2690,7 @@ async function openJobForm(id) {
   const j = id ? (APP.jobs || []).find(x => String(x.id) === String(id)) : {};
   const body = `<div class="space-y-3">${grid('md:grid-cols-2 gap-3', [
     fieldRow('Job title', 'j_title', j.title, { required: true }),
-    fieldRow('Department', 'j_dept', j.department_id, { type: 'select', options: (APP.lookups.departments || []).map(d => ({ value: d.id, label: d.name })), placeholder: 'Unassigned' }),
+    typeOrAddField('Department', 'j_dept_name', (APP.lookups.departments || []).map(d => d.name), 'Pick an existing department or type a new one - it is created when you publish.', deptName(j.department_id) !== '—' ? deptName(j.department_id) : ''),
     fieldRow('Location', 'j_loc', j.location, { placeholder: 'Bengaluru / Hybrid' }),
     fieldRow('Employment type', 'j_type', j.employment_type || 'Full-time', { type: 'select', options: ['Full-time', 'Part-time', 'Contract', 'Intern'] }),
     fieldRow('Experience', 'j_exp', j.experience, { placeholder: '2-4 years' }),
@@ -2677,10 +2704,12 @@ async function openJobForm(id) {
   openModal(id ? 'Update job' : 'Post a job', body, modalFootSave(`submitJob('${id || ''}')`, id ? 'Save changes' : 'Publish job'));
 }
 async function submitJob(id) {
-  const v = formValues(['j_title', 'j_dept', 'j_loc', 'j_type', 'j_exp', 'j_range', 'j_openings', 'j_hm', 'j_status', 'j_posted', 'j_desc']);
+  const v = formValues(['j_title', 'j_dept_name', 'j_loc', 'j_type', 'j_exp', 'j_range', 'j_openings', 'j_hm', 'j_status', 'j_posted', 'j_desc']);
   if (!v.j_title) { toast('A title is required', 'error'); return; }
-  const body = { title: v.j_title, department_id: v.j_dept || null, location: v.j_loc, employment_type: v.j_type, experience: v.j_exp, salary_range: v.j_range, openings: num(v.j_openings) || 1, hiring_manager_id: v.j_hm || null, status: v.j_status, posted_at: v.j_posted, description: v.j_desc };
-  try { const r = await api(id ? '/api/jobs/' + id : '/api/jobs', { method: id ? 'PUT' : 'POST', body }); toast(r.message || 'Saved', 'success'); closeAllModals(); loadHiring(true); loadDashboard(true); } catch (e) { }
+  try {
+    const body = { title: v.j_title, department_id: await resolveTypeOrAdd('department', 'j_dept_name'), location: v.j_loc, employment_type: v.j_type, experience: v.j_exp, salary_range: v.j_range, openings: num(v.j_openings) || 1, hiring_manager_id: v.j_hm || null, status: v.j_status, posted_at: v.j_posted, description: v.j_desc };
+    const r = await api(id ? '/api/jobs/' + id : '/api/jobs', { method: id ? 'PUT' : 'POST', body }); toast(r.message || 'Saved', 'success'); closeAllModals(); loadHiring(true); loadDashboard(true);
+  } catch (e) { }
 }
 function openHireForm(id) {
   const c = (APP.candidates || []).find(x => String(x.id) === String(id)) || {};
@@ -2691,8 +2720,8 @@ function openHireForm(id) {
       fieldRow('Work email', 'h_email', (String(c.email || '').split('@')[0] || 'new.hire') + '@company.com', { type: 'email', required: true }),
       fieldRow('Phone', 'h_phone', c.phone),
       fieldRow('Date of joining', 'h_doj', todayIso(), { type: 'date', required: true }),
-      fieldRow('Department', 'h_dept', job.department_id, { type: 'select', options: (APP.lookups.departments || []).map(d => ({ value: d.id, label: d.name })), placeholder: 'From the requisition' }),
-      fieldRow('Designation', 'h_desig', job.designation_id, { type: 'select', options: (APP.lookups.designations || []).map(d => ({ value: d.id, label: d.title })), placeholder: 'From the requisition' }),
+      typeOrAddField('Department', 'h_dept_name', (APP.lookups.departments || []).map(d => d.name), 'From the requisition - pick an existing department or type a new one.', deptName(job.department_id) !== '—' ? deptName(job.department_id) : ''),
+      typeOrAddField('Designation', 'h_desig_name', (APP.lookups.designations || []).map(d => d.title), 'From the requisition - pick an existing title or type a new one.', job.designation_id ? (desigName(job.designation_id) !== '—' ? desigName(job.designation_id) : '') : ''),
       fieldRow('Reports to', 'h_mgr', job.hiring_manager_id, { type: 'select', options: employeeOptions(false), placeholder: 'Hiring manager from the job' }),
       fieldRow('Employment type', 'h_type', job.employment_type || 'Full-time', { type: 'select', options: ['Full-time', 'Part-time', 'Contract', 'Intern'] }),
       fieldRow('Work location', 'h_loc', job.location || 'Bengaluru'),
@@ -2701,10 +2730,14 @@ function openHireForm(id) {
   openModal('Convert candidate to employee', body, modalFootSave(`submitHire('${id}')`, 'Create employee record'));
 }
 async function submitHire(id) {
-  const v = formValues(['h_name', 'h_email', 'h_phone', 'h_doj', 'h_dept', 'h_desig', 'h_mgr', 'h_type', 'h_loc', 'h_ctc', 'h_dob', 'h_pan', 'h_gender']);
+  const v = formValues(['h_name', 'h_email', 'h_phone', 'h_doj', 'h_dept_name', 'h_desig_name', 'h_mgr', 'h_type', 'h_loc', 'h_ctc', 'h_dob', 'h_pan', 'h_gender']);
   const body = { full_name: v.h_name, email: v.h_email, phone: v.h_phone, date_of_joining: v.h_doj, salary_ctc: num(v.h_ctc), employment_type: v.h_type, work_location: v.h_loc, date_of_birth: v.h_dob || null, pan_no: v.h_pan || null, gender: v.h_gender || null };
-  ['h_dept', 'h_desig', 'h_mgr'].forEach((k, i) => { const key = ['department_id', 'designation_id', 'manager_id'][i]; if (v[k]) body[key] = v[k]; });
+  if (v.h_mgr) body.manager_id = v.h_mgr;
   try {
+    const deptId = await resolveTypeOrAdd('department', 'h_dept_name');
+    if (deptId) body.department_id = deptId;
+    const desigId = await resolveTypeOrAdd('designation', 'h_desig_name', deptId);
+    if (desigId) body.designation_id = desigId;
     const r = await api(`/api/candidates/${id}/hire`, { method: 'POST', body });
     toast(r.message, 'success'); closeAllModals();
     APP.lookups = null; await loadLookups(true);
