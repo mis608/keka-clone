@@ -3,10 +3,10 @@
 {% block body %}
 <div class="min-h-screen flex">
     <!-- Left - Branding -->
-    <div class="hidden lg:flex w-[52%] bg-[#004A17] relative overflow-hidden flex-col justify-between p-12">
+    <div class="hidden lg:flex w-[52%] bg-[#052e16] relative overflow-hidden flex-col justify-between p-12">
         <div class="absolute inset-0">
-            <div class="absolute top-[-20%] left-[-10%] w-[70%] h-[70%] bg-[#7c3aed]/20 rounded-full blur-[120px]"></div>
-            <div class="absolute bottom-[-10%] right-[-10%] w-[60%] h-[60%] bg-[#a78bfa]/20 rounded-full blur-[120px]"></div>
+            <div class="absolute top-[-20%] left-[-10%] w-[70%] h-[70%] bg-[#15803d]/20 rounded-full blur-[120px]"></div>
+            <div class="absolute bottom-[-10%] right-[-10%] w-[60%] h-[60%] bg-[#4ade80]/20 rounded-full blur-[120px]"></div>
         </div>
         
         <div class="relative z-10">
@@ -19,13 +19,13 @@
 
         <div class="relative z-10 max-w-[480px]">
             <h1 class="text-[44px] leading-[1.1] font-display font-bold text-white mb-6">
-                The best HR<br/>software for<br/><span class="text-[#c4b5fd]">growing businesses.</span>
+                The best HR<br/>software for<br/><span class="text-[#86efac]">growing businesses.</span>
             </h1>
             <p class="text-white/60 text-[16px] leading-relaxed mb-10">Manage attendance, payroll, leave, hiring and performance - everything in one beautiful dashboard. Built with Python & Supabase.</p>
             
             <div class="grid grid-cols-2 gap-4">
                 <div class="bg-white/5 backdrop-blur border border-white/10 rounded-2xl p-5">
-                    <div class="w-10 h-10 rounded-xl bg-[#7c3aed] flex items-center justify-center mb-3"><i class="fas fa-users text-white"></i></div>
+                    <div class="w-10 h-10 rounded-xl bg-[#15803d] flex items-center justify-center mb-3"><i class="fas fa-users text-white"></i></div>
                     <div class="text-white font-semibold">Core HR & Payroll</div>
                     <div class="text-white/50 text-sm mt-1">Automated salary & compliance</div>
                 </div>
@@ -51,33 +51,33 @@
             </div>
 
             <div class="mb-8">
-                <h2 class="text-[28px] font-display font-bold text-[#2e1065] leading-tight">Welcome back!</h2>
+                <h2 class="text-[28px] font-display font-bold text-[#052e16] leading-tight">Welcome back!</h2>
                 <p class="text-[#94a3b8] mt-2">Login to your HRMS dashboard</p>
             </div>
 
             <form id="loginForm" class="space-y-5">
                 <div>
-                    <label class="text-sm font-medium text-[#2e1065] mb-2 block">Work Email</label>
+                    <label class="text-sm font-medium text-[#052e16] mb-2 block">Work Email</label>
                     <div class="relative">
                         <span class="absolute left-4 top-1/2 -translate-y-1/2 text-[#94a3b8]"><i class="far fa-envelope"></i></span>
-                        <input type="email" name="email" value="admin@company.com" required class="w-full pl-11 pr-4 py-3.5 rounded-xl border border-gray-200 focus:border-[#7c3aed] focus:ring-4 focus:ring-[#7c3aed]/10 outline-none transition text-[14px]" placeholder="you@company.com">
+                        <input type="email" name="email" value="admin@company.com" required class="w-full pl-11 pr-4 py-3.5 rounded-xl border border-gray-200 focus:border-[#15803d] focus:ring-4 focus:ring-[#15803d]/10 outline-none transition text-[14px]" placeholder="you@company.com">
                     </div>
                 </div>
                 <div>
                     <div class="flex justify-between items-center mb-2">
-                        <label class="text-sm font-medium text-[#2e1065]">Password</label>
+                        <label class="text-sm font-medium text-[#052e16]">Password</label>
                         <span class="text-xs text-[#94a3b8] pt-0.5">Forgotten? HR can issue a one-time password</span>
                     </div>
                     <div class="relative">
                         <span class="absolute left-4 top-1/2 -translate-y-1/2 text-[#94a3b8]"><i class="fas fa-lock"></i></span>
-                        <input id="loginPassword" type="password" name="password" required class="w-full pl-11 pr-11 py-3.5 rounded-xl border border-gray-200 focus:border-[#7c3aed] focus:ring-4 focus:ring-[#7c3aed]/10 outline-none transition text-[14px]" placeholder="••••••••">
-                        <button type="button" id="togglePw" aria-label="Show password" class="absolute right-3 top-1/2 -translate-y-1/2 w-7 h-7 rounded-lg text-[#94a3b8] hover:bg-[#f5f3ff] transition"><i class="far fa-eye"></i></button>
+                        <input id="loginPassword" type="password" name="password" required class="w-full pl-11 pr-11 py-3.5 rounded-xl border border-gray-200 focus:border-[#15803d] focus:ring-4 focus:ring-[#15803d]/10 outline-none transition text-[14px]" placeholder="••••••••">
+                        <button type="button" id="togglePw" aria-label="Show password" class="absolute right-3 top-1/2 -translate-y-1/2 w-7 h-7 rounded-lg text-[#94a3b8] hover:bg-[#f0fdf4] transition"><i class="far fa-eye"></i></button>
                     </div>
                     <p class="text-xs text-[#94a3b8] mt-2">Everyone signs in with their work email. HR Admins get the full console; the rest of the team gets their own attendance, leave, payslips, claims, documents and goals.</p>
                 </div>
 
                 <div id="loginError" class="hidden mb-4 p-3 rounded-xl bg-[#ffecec] border border-[#ffd6d6] text-[#e17055] text-sm"></div>
-                <button type="submit" class="w-full bg-[#7c3aed] hover:bg-[#6d28d9] text-white font-semibold py-3.5 rounded-xl transition shadow-lg shadow-[#7c3aed]/20 flex items-center justify-center gap-2">
+                <button type="submit" class="w-full bg-[#15803d] hover:bg-[#166534] text-white font-semibold py-3.5 rounded-xl transition shadow-lg shadow-[#15803d]/20 flex items-center justify-center gap-2">
                     <span>Sign in to Ekkaa HRMS</span><i class="fas fa-arrow-right text-sm"></i>
                 </button>
 
@@ -92,16 +92,16 @@
                 </div>
             </form>
 
-            <div class="mt-8 p-4 rounded-xl bg-[#f5f3ff] border border-dashed border-gray-200">
+            <div class="mt-8 p-4 rounded-xl bg-[#f0fdf4] border border-dashed border-gray-200">
                 <div class="flex gap-3">
                     <div class="w-8 h-8 rounded-full bg-amber-100 flex items-center justify-center flex-shrink-0"><i class="fas fa-lightbulb text-amber-600 text-sm"></i></div>
                     <div>
-                        <div class="text-sm font-semibold text-[#2e1065]">Quick Demo Access</div>
-                        <div class="text-xs text-[#94a3b8] mt-1 leading-relaxed">No Supabase? App runs in <span class="font-semibold text-[#7c3aed]">Mock Mode</span> with sample data. Add your Supabase keys in .env to connect real database.</div>
+                        <div class="text-sm font-semibold text-[#052e16]">Quick Demo Access</div>
+                        <div class="text-xs text-[#94a3b8] mt-1 leading-relaxed">No Supabase? App runs in <span class="font-semibold text-[#15803d]">Mock Mode</span> with sample data. Add your Supabase keys in .env to connect real database.</div>
                         {% if mock_mode %}<div class="flex flex-wrap items-center gap-1.5 mt-2 text-xs">
-                        <button type="button" id="fillAdmin" class="font-medium text-[#7c3aed] hover:underline">Fill the HR Admin email</button>
+                        <button type="button" id="fillAdmin" class="font-medium text-[#15803d] hover:underline">Fill the HR Admin email</button>
                         <span class="text-[#cbd5e1]">·</span>
-                        <button type="button" id="fillEmployee" class="font-medium text-[#7c3aed] hover:underline">Fill an employee email</button>
+                        <button type="button" id="fillEmployee" class="font-medium text-[#15803d] hover:underline">Fill an employee email</button>
                         <span class="text-[#94a3b8]">(demo data only)</span>
                     </div>{% endif %}
                     </div>

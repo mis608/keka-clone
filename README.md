@@ -2,7 +2,7 @@
 
 A complete, production-ready HRMS built with **Python Flask** and **Supabase**. Modern, clean UI with all major HR modules.
 
-![Ekkaa HRMS](https://img.shields.io/badge/Stack-Flask%20%2B%20Supabase-7c3aed) ![Python](https://img.shields.io/badge/Python-3.10%2B-blue) ![License](https://img.shields.io/badge/License-MIT-green)
+![Ekkaa HRMS](https://img.shields.io/badge/Stack-Flask%20%2B%20Supabase-15803d) ![Python](https://img.shields.io/badge/Python-3.10%2B-blue) ![License](https://img.shields.io/badge/License-MIT-green)
 
 ---
 
@@ -192,10 +192,10 @@ All endpoints work in both Mock and Supabase mode via `get_supabase_data()` wrap
 
 ## ðŸŽ¨ UI Details - Design System
 
-- **Sidebar:** #004A17 dark, active state #8b5cf6, icons with opacity
-- **Primary:** #7c3aed (brand purple)
-- **Background:** #f5f3ff (light gray)
-- **Cards:** 16px radius, 1px #ede9fe border, soft shadow
+- **Sidebar:** #052e16 dark, active state #16a34a, icons with opacity
+- **Primary:** #15803d (brand green)
+- **Background:** #f0fdf4 (light green tint)
+- **Cards:** 16px radius, 1px #dcfce7 border, soft shadow
 - **Typography:** Inter + Plus Jakarta Sans
 - **Components:** Pill filters, avatar initials, status dots
 
