@@ -1,4 +1,4 @@
-﻿# Ekkaa HRMS - Python + Supabase
+# Ekkaa HRMS - Python + Supabase
 
 A complete, production-ready HRMS built with **Python Flask** and **Supabase**. Modern, clean UI with all major HR modules.
 
@@ -192,7 +192,7 @@ All endpoints work in both Mock and Supabase mode via `get_supabase_data()` wrap
 
 ## ðŸŽ¨ UI Details - Design System
 
-- **Sidebar:** #2e1065 dark, active state #8b5cf6, icons with opacity
+- **Sidebar:** #004A17 dark, active state #8b5cf6, icons with opacity
 - **Primary:** #7c3aed (brand purple)
 - **Background:** #f5f3ff (light gray)
 - **Cards:** 16px radius, 1px #ede9fe border, soft shadow
