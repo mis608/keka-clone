@@ -1,12 +1,12 @@
-# Ekkaa HRMS - Python + Supabase
+﻿# Ekkaa HRMS - Python + Supabase
 
 A complete, production-ready HRMS built with **Python Flask** and **Supabase**. Modern, clean UI with all major HR modules.
 
-![Ekkaa HRMS](https://img.shields.io/badge/Stack-Flask%20%2B%20Supabase-584ac0) ![Python](https://img.shields.io/badge/Python-3.10%2B-blue) ![License](https://img.shields.io/badge/License-MIT-green)
+![Ekkaa HRMS](https://img.shields.io/badge/Stack-Flask%20%2B%20Supabase-7c3aed) ![Python](https://img.shields.io/badge/Python-3.10%2B-blue) ![License](https://img.shields.io/badge/License-MIT-green)
 
 ---
 
-## ✨ Features - Complete HRMS Suite
+## âœ¨ Features - Complete HRMS Suite
 
 ### 1. **Dashboard / Home**
 - Live clock in/out widget
@@ -33,7 +33,7 @@ A complete, production-ready HRMS built with **Python Flask** and **Supabase**. 
 ### 4. **Leave Management**
 - Leave balances cards (CL, SL, EL, WFH) with color coding
 - Apply leave modal (calculates days automatically)
-- Approval workflow (Pending → Approved/Rejected)
+- Approval workflow (Pending â†’ Approved/Rejected)
 - Team calendar mini-view
 - `leave_types`, `leave_balances`, `leave_requests` tables
 
@@ -66,7 +66,7 @@ A complete, production-ready HRMS built with **Python Flask** and **Supabase**. 
 
 ---
 
-## 🏗️ Tech Stack
+## ðŸ—ï¸ Tech Stack
 
 - **Backend:** Python Flask 3.0, Flask-Cors, Gunicorn
 - **Database:** Supabase (Postgres + Auth + Storage)
@@ -76,40 +76,40 @@ A complete, production-ready HRMS built with **Python Flask** and **Supabase**. 
 
 ---
 
-## 📁 Project Structure
+## ðŸ“ Project Structure
 
 ```
 keka-hrms-clone/
-├── app.py                 # Main Flask app + all API routes
-├── requirements.txt       # Python deps
-├── .env.example           # Env template
-├── supabase_schema.sql    # Full DB schema (run in Supabase SQL editor)
-├── templates/
-│   ├── base.html          # Base layout (Tailwind config)
-│   ├── login.html         # Login page (dark branding)
-│   └── dashboard.html     # Main SPA - all modules
-└── static/
-    └── js/app.js          # Frontend logic, charts, API calls
+â”œâ”€â”€ app.py                 # Main Flask app + all API routes
+â”œâ”€â”€ requirements.txt       # Python deps
+â”œâ”€â”€ .env.example           # Env template
+â”œâ”€â”€ supabase_schema.sql    # Full DB schema (run in Supabase SQL editor)
+â”œâ”€â”€ templates/
+â”‚   â”œâ”€â”€ base.html          # Base layout (Tailwind config)
+â”‚   â”œâ”€â”€ login.html         # Login page (dark branding)
+â”‚   â””â”€â”€ dashboard.html     # Main SPA - all modules
+â””â”€â”€ static/
+    â””â”€â”€ js/app.js          # Frontend logic, charts, API calls
 ```
 
 ---
 
-## 🚀 Setup From Scratch - Step by Step
+## ðŸš€ Setup From Scratch - Step by Step
 
 ### Step 1: Create Supabase Project
-1. Go to https://supabase.com → New Project
+1. Go to https://supabase.com â†’ New Project
 2. Name: `keka-hrms-clone`, set DB password
 3. Wait ~2 mins for provisioning
-4. Go to **Project Settings → API** → Copy:
+4. Go to **Project Settings â†’ API** â†’ Copy:
    - `Project URL` (e.g. https://xyz.supabase.co)
    - `anon public key`
    - `service_role key` (keep secret)
 
 ### Step 2: Run Database Schema
-1. In Supabase Dashboard → **SQL Editor** → New Query
+1. In Supabase Dashboard â†’ **SQL Editor** â†’ New Query
 2. Paste entire `supabase_schema.sql` file content
-3. Click **Run** → Should create 18 tables + seed data
-4. Verify in **Table Editor** → you should see `departments`, `employees`, etc.
+3. Click **Run** â†’ Should create 18 tables + seed data
+4. Verify in **Table Editor** â†’ you should see `departments`, `employees`, etc.
 
 ### Step 3: Clone & Setup Python Env
 ```bash
@@ -161,11 +161,11 @@ if supabase:
   res = supabase.auth.sign_in_with_password({"email": email, "password": password})
   session['user'] = res.user
 ```
-And create users in Supabase **Authentication → Users**.
+And create users in Supabase **Authentication â†’ Users**.
 
 ### Step 7: Deploy
 **Render.com:**
-- New Web Service → Connect repo
+- New Web Service â†’ Connect repo
 - Build: `pip install -r requirements.txt`
 - Start: `gunicorn app:app`
 - Add env vars from .env
@@ -174,7 +174,7 @@ And create users in Supabase **Authentication → Users**.
 
 ---
 
-## 🔌 API Endpoints
+## ðŸ”Œ API Endpoints
 
 All under `/api/`:
 
@@ -190,22 +190,22 @@ All endpoints work in both Mock and Supabase mode via `get_supabase_data()` wrap
 
 ---
 
-## 🎨 UI Details - Design System
+## ðŸŽ¨ UI Details - Design System
 
-- **Sidebar:** #1e1f2b dark, active state #2f3244, icons with opacity
-- **Primary:** #584ac0 (brand purple)
-- **Background:** #f6f7fb (light gray)
-- **Cards:** 16px radius, 1px #eef0f6 border, soft shadow
+- **Sidebar:** #2e1065 dark, active state #8b5cf6, icons with opacity
+- **Primary:** #7c3aed (brand purple)
+- **Background:** #f5f3ff (light gray)
+- **Cards:** 16px radius, 1px #ede9fe border, soft shadow
 - **Typography:** Inter + Plus Jakarta Sans
 - **Components:** Pill filters, avatar initials, status dots
 
 ---
 
-## 🔒 Production Hardening TODO
+## ðŸ”’ Production Hardening TODO
 
 - Replace mock auth with Supabase Auth + RLS strict policies
 - Add role-based access (HR Admin, Manager, Employee)
-- File uploads → Supabase Storage (resumes, docs, receipts)
+- File uploads â†’ Supabase Storage (resumes, docs, receipts)
 - Add pagination & server-side search
 - Email notifications for leave approvals (Supabase Edge Functions)
 - Payroll calculation engine (PF, ESI, TDS logic)
@@ -213,22 +213,22 @@ All endpoints work in both Mock and Supabase mode via `get_supabase_data()` wrap
 
 ---
 
-## 📸 Screenshots Flow
+## ðŸ“¸ Screenshots Flow
 
-Login → Dashboard with clock widget → Employees table → Leave apply → Payroll → Hiring kanban → Performance OKRs
+Login â†’ Dashboard with clock widget â†’ Employees table â†’ Leave apply â†’ Payroll â†’ Hiring kanban â†’ Performance OKRs
 
 All modules are SPA sections inside `dashboard.html` - no page reloads.
 
 ---
 
-## 🤝 Contributing
+## ðŸ¤ Contributing
 
 PRs welcome! This is meant as a starter kit for anyone building HRMS in Python.
 
 ---
 
-## 📄 License
+## ðŸ“„ License
 
 MIT - Use freely for your company.
 
-Built with ❤️ - Python + Supabase edition.
+Built with â¤ï¸ - Python + Supabase edition.
