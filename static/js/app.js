@@ -769,7 +769,7 @@ async function openEmployeeForm(id) {
     ${grid('md:grid-cols-3 gap-3', [f('Full name', 'full_name', { required: true }), f('Work email', 'email', { required: true, type: 'email' }), f('Personal email', 'personal_email', { type: 'email' })].join(''))}
     ${grid('md:grid-cols-3 gap-3', [f('Phone', 'phone'), f('Employee code', 'employee_code', { placeholder: 'auto-generated' }), f('Gender', 'gender', { type: 'select', options: ['Male', 'Female', 'Other'], placeholder: 'Select' })].join(''))}
     ${grid('md:grid-cols-3 gap-3', [f('Date of birth', 'date_of_birth', { type: 'date' }), f('Date of joining', 'date_of_joining', { type: 'date' }), f('Blood group', 'blood_group', { type: 'select', options: ['A+', 'A-', 'B+', 'B-', 'O+', 'O-', 'AB+', 'AB-'], placeholder: 'Select' })].join(''))}
-    ${grid('md:grid-cols-3 gap-3', [f('Department', 'department_id', { type: 'select', options: depts, placeholder: 'Unassigned' }), f('Designation', 'designation_id', { type: 'select', options: desigs, placeholder: 'Unassigned' }), f('Reports to', 'manager_id', { type: 'select', options: mgrs, placeholder: 'No manager' })].join(''))}
+    ${grid('md:grid-cols-3 gap-3', [f('Department', 'department_id', { type: 'select', options: depts, placeholder: 'Unassigned' }), `<div><div class="lbl">Designation</div><input id="designation_name" class="field" list="desigOptions" autocomplete="off" placeholder="Unassigned - type to pick or add" value="${esc((e.designation_id && desigName(e.designation_id) !== '—') ? desigName(e.designation_id) : '')}"><datalist id="desigOptions">${desigs.map(d => `<option value="${esc(d.label)}">`).join('')}</datalist><div class="text-[11px] text-[#94a3b8] mt-1">Pick an existing title or type a new one - it is added to the list when you save.</div></div>`, f('Reports to', 'manager_id', { type: 'select', options: mgrs, placeholder: 'No manager' })].join(''))}
     ${grid('md:grid-cols-4 gap-3', [f('Employment type', 'employment_type', { type: 'select', options: ['Full-time', 'Part-time', 'Contract', 'Intern'], placeholder: 'Full-time' }), f('Work location', 'work_location', { placeholder: 'Bengaluru' }), f('Annual CTC', 'salary_ctc', { type: 'number', step: 1000 }), f('Status', 'status', { type: 'select', options: ['Active', 'On Leave', 'Notice Period', 'Exited'], placeholder: 'Active' })].join(''))}
     ${grid('md:grid-cols-2 gap-3', [f('Address', 'address'), f('Nationality', 'nationality', { placeholder: 'Indian' })].join(''))}
     <details ${e.pan_no || e.bank_account_no ? 'open' : ''} class="border border-[#f1f5f9] rounded-xl p-3"><summary class="text-[12.5px] font-semibold cursor-pointer text-[#15803d]">Statutory & bank details</summary>
@@ -792,6 +792,18 @@ async function submitEmployeeForm(id) {
   ['department_id', 'designation_id', 'manager_id'].forEach(k => { if (!v[k]) delete v[k]; });
   Object.keys(v).forEach(k => { if (v[k] === null || v[k] === '') delete v[k]; });
   try {
+    const typedDesig = ($('#designation_name') ? $('#designation_name').value : '').trim();
+    if (typedDesig) {
+      const match = (APP.lookups.designations || []).find(d => String(d.title || '').trim().toLowerCase() === typedDesig.toLowerCase());
+      if (match) {
+        v.designation_id = match.id;
+      } else {
+        const created = await api('/api/designations', { method: 'POST', body: { title: typedDesig, department_id: v.department_id || null } });
+        v.designation_id = created.designation.id;
+        toast(created.message, 'success');
+        APP.lookups = null; await loadLookups(true);
+      }
+    }
     const res = id ? await api('/api/employees/' + id, { method: 'PUT', body: v }) : await api('/api/employees', { method: 'POST', body: v });
     toast(res.message, 'success'); closeAllModals();
     APP.lookups = null; await loadLookups(true);

@@ -1380,6 +1380,31 @@ def api_designations():
                      "level": d.get("level")} for d in db_list("designations")])
 
 
+@app.route("/api/designations", methods=["POST"])
+@admin_required
+def api_designation_create():
+    """Create a designation inline from the Add/Edit employee form: the HR Admin types a
+    title that is not on the list yet. If the title already exists (case-insensitive) the
+    existing row is returned instead, so the employee gets linked without a duplicate."""
+    data = request.get_json(silent=True) or {}
+    title = (data.get("title") or "").strip()
+    if not title:
+        raise ApiError("A designation needs a title")
+    if len(title) > 60:
+        raise ApiError("Keep the designation title under 60 characters")
+    existing = next((d for d in db_list("designations")
+                     if str(d.get("title") or "").strip().lower() == title.lower()), None)
+    if existing:
+        return jsonify({"success": True, "created": False, "designation": existing,
+                        "message": f"Using the existing '{existing.get('title')}' designation"})
+    dept = data.get("department_id")
+    payload = {"title": title, "level": data.get("level") or None,
+               "department_id": str(dept) if dept and db_get("departments", dept) else None}
+    created = db_insert("designations", payload)
+    return jsonify({"success": True, "created": True, "designation": created,
+                    "message": f"'{title}' added to the designation list"})
+
+
 @app.route("/api/shifts")
 def api_shifts():
     return jsonify(db_list("shifts"))
