@@ -40,6 +40,19 @@ app.secret_key = os.getenv("FLASK_SECRET_KEY", "keka-clone-secret-key-2026-super
 app.config["MAX_CONTENT_LENGTH"] = 25 * 1024 * 1024        # 25 MB uploads
 CORS(app)
 
+
+def _asset_version(filename):
+    """Cache-buster for static assets: the file's mtime, so a redeploy (or an edit
+    during development) instantly produces a new /static/...?v=NNN URL and browsers
+    stop serving the stale previous JS."""
+    try:
+        return str(int(os.path.getmtime(os.path.join(APP_DIR, "static", filename))))
+    except OSError:
+        return "1"
+
+
+app.jinja_env.globals["asset_v"] = _asset_version("js/app.js")
+
 # ---------------- Supabase setup ----------------
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY") or os.getenv("SUPABASE_PUBLISHABLE_KEY")

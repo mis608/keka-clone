@@ -90,7 +90,7 @@ async function main() {
   html = html.replace(/<script[^>]+src="https?:[^"]*"[^>]*><\/script>/g, '');
   html = html.replace(/<link[^>]+href="https?:[^"]*"[^>]*>/g, '');
   html = html.replace(/<script>\s*tailwind\.config[\s\S]*?<\/script>/, '');
-  const tag = /<script[^>]+src="\/static\/js\/app\.js"[^>]*><\/script>/;
+  const tag = /<script[^>]+src="\/static\/js\/app\.js[^"]*"[^>]*><\/script>/;
   if (!tag.test(html)) throw new Error('app.js script tag not found in /dashboard');
   html = html.replace(tag, () => `<script>\n${APP_JS}\n</script>`);
 

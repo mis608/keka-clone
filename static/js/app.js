@@ -488,10 +488,16 @@ function renderTracker(t) {
 }
 
 /* ---------------------------- punch location (GPS) ---------------------------- */
-// Best-effort GPS pin captured on every Clock in / Clock out. The W3C "device location"
-// API (Chrome 130+) is the only browser-native way to get real coordinates; when it is
-// missing, permission is denied or the request times out, the punch simply has no pin
-// and the server records "Office" - nobody is ever blocked by a privacy prompt.
+// Best-effort GPS pin captured on every Clock in / Clock out. The W3C Geolocation API is
+// the only browser-native way to get real coordinates; when it is missing, permission is
+// denied, GPS is off (no network fallback either) or the request times out, the punch
+// simply has no pin and the server records "Office" - nobody is ever blocked by a
+// privacy prompt. clockAction() surfaces *why* the pin is missing as a warn toast so the
+// employee can actually fix it (allow location / turn on GPS) instead of silently
+// getting "Office" every day.
+// NOTE: geolocation only works on a secure page (https, or http://localhost while
+// developing). On plain http over a LAN IP the API does not exist at all - reason
+// "insecure" below tells the user exactly that.
 function reverseGeo(lat, lng) {
   const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}&zoom=16&accept-language=en`;
   return Promise.race([
@@ -501,36 +507,103 @@ function reverseGeo(lat, lng) {
   ]);
 }
 
-async function geoTag() {
-  if (!navigator.geolocation || typeof navigator.geolocation.getCurrentPosition !== 'function') return {};
-  try {
-    const pos = await Promise.race([
-      Promise.resolve(navigator.geolocation.getCurrentPosition({ timeout: 3000, maximumAge: 0, enableHighAccuracy: true }))
-        .catch(() => null),
-      new Promise(r => setTimeout(() => r(null), 3500)),
-    ]);
-    const la = Number(pos && pos.coords && pos.coords.latitude);
-    const lo = Number(pos && pos.coords && pos.coords.longitude);
-    if (!Number.isFinite(la) || !Number.isFinite(lo)) return {};
-    const out = { lat: la, lng: lo };
-    const acc = Number(pos.coords.accuracy);
-    if (Number.isFinite(acc)) out.accuracy = acc;
-    const addr = await reverseGeo(la, lo);
-    if (addr) out.address = addr;
-    return out;
-  } catch (e) {
-    return {};
-  }
+// navigator.geolocation.getCurrentPosition is callback-based (it returns nothing), so it
+// must be wrapped in a Promise with real success + error callbacks. A previous version
+// passed the options object as the success callback and the punch never got coordinates.
+function geoPosition(options) {
+  return new Promise(resolve => {
+    if (!navigator.geolocation || typeof navigator.geolocation.getCurrentPosition !== 'function') {
+      resolve({ reason: window.isSecureContext ? 'unsupported' : 'insecure' });
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      pos => resolve({ pos }),
+      err => resolve({ reason: { 1: 'denied', 2: 'unavailable', 3: 'timeout' }[err.code] || 'unavailable' }),
+      options,
+    );
+  });
 }
 
+async function geoTag() {
+  const done = (out, extra) => Object.assign(out, extra || {});
+  // 1) Precise pass first: enableHighAccuracy asks the device for GPS (this is also what
+  //    makes Android/Chrome suggest turning the GPS on when it is off).
+  const first = await geoPosition({ enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
+  let pos = first.pos;
+  // 2) GPS off / slow fix? one cheaper pass over Wi-Fi/cell network location, which
+  //    usually still pins the right building even with GPS switched off.
+  if (!pos) {
+    const second = await geoPosition({ enableHighAccuracy: false, timeout: 7000, maximumAge: 30000 });
+    pos = second.pos;
+    if (!pos) {
+      const reason = (first.reason === 'denied' || second.reason === 'denied') ? 'denied'
+        : (first.reason === 'insecure' || second.reason === 'insecure') ? 'insecure'
+        : (first.reason === 'timeout' || second.reason === 'timeout') ? 'timeout' : 'unavailable';
+      // 3) last resort: pin from the network IP. Works on plain http (where the browser
+      //    GPS API does not exist at all) and needs no permission - but it is city-level,
+      //    so the stored address says so.
+      const ip = await ipLocation();
+      if (Number.isFinite(Number(ip.lat)) && Number.isFinite(Number(ip.lng))) return done({ ...ip, via: 'ip' });
+      return done({}, { reason });
+    }
+  }
+  const la = Number(pos && pos.coords && pos.coords.latitude);
+  const lo = Number(pos && pos.coords && pos.coords.longitude);
+  if (!Number.isFinite(la) || !Number.isFinite(lo)) return done({}, { reason: 'unavailable' });
+  const out = { lat: la, lng: lo };
+  const acc = Number(pos.coords.accuracy);
+  if (Number.isFinite(acc)) out.accuracy = acc;
+  const addr = await reverseGeo(la, lo);
+  if (addr) out.address = addr;
+  return done(out);
+}
+
+// IP-based location fallback (no permission prompt, works on http too). Two public
+// services are tried in order; both are CORS-friendly and need no API key.
+async function ipLocation() {
+  if (typeof fetch !== 'function') return {};
+  const lookup = async (url) => {
+    try {
+      const res = await Promise.race([fetch(url), new Promise(r => setTimeout(() => r(null), 4000))]);
+      if (!res || !res.ok) return null;
+      const j = await res.json();
+      const lat = Number(j && (j.latitude ?? j.lat)), lng = Number(j && (j.longitude ?? j.lon));
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+      const where = [j.city, j.region, j.country].filter(Boolean).join(', ');
+      return { lat, lng, ...(where ? { address: `${where} (approx. IP location)` } : {}) };
+    } catch (e) { return null; }
+  };
+  return (await lookup('https://ipwho.is/')) || (await lookup('https://get.geojs.io/v1/ip/geo.json')) || {};
+}
+
+const PUNCH_LOCATION_HINTS = {
+  denied: 'Location permission is blocked for this site - allow Location in the browser and clock again for a precise pin.',
+  unavailable: 'Could not get your location (GPS off, no network location, IP lookup failed) - the punch was saved with "Office".',
+  timeout: 'Getting your location took too long and the IP fallback failed - the punch was saved with "Office".',
+  insecure: 'Browser GPS needs a secure page (https or localhost) - the pin is approximate from your network IP.',
+  unsupported: 'This browser does not support live location - the pin is approximate from your network IP.',
+};
+
 async function clockAction(action) {
+  const busy = action === 'in' ? $('#btnClockIn') : $('#btnClockOut');
+  const prev = { text: busy ? busy.textContent : '', dis: busy ? busy.disabled : false };
+  if (busy) { busy.disabled = true; busy.textContent = 'Locating…'; busy.classList.add('cursor-wait'); }
   try {
     const loc = await geoTag();
+    const reason = loc.reason, viaIp = loc.via;
+    delete loc.reason;
+    delete loc.via;
     const res = await api('/api/attendance/clock', { method: 'POST', body: { action, ...loc } });
-    toast(res.message, 'success');
+    const att = res.attendance || {};
+    const pin = action === 'in' ? att.clock_in_location_label : att.clock_out_location_label;
+    toast(res.message + (pin ? ` · 📍 ${pin}` : ''), 'success');
+    if (viaIp) setTimeout(() => toast('GPS was not available, so this pin is approximate (network IP level).', 'info'), 700);
+    else if (reason) setTimeout(() => toast(PUNCH_LOCATION_HINTS[reason] || PUNCH_LOCATION_HINTS.unavailable, 'warn'), 700);
     loadDashboard(true);
     if (currentModule === 'attendance') loadAttendance(true);
-  } catch (e) { /* toast already shown */ }
+  } catch (e) { /* toast already shown */
+    if (busy) { busy.textContent = prev.text || (action === 'in' ? 'Clock in' : 'Clock out'); busy.disabled = prev.dis; busy.classList.remove('cursor-wait'); }
+  }
 }
 
 function renderTodayWidget(t) {

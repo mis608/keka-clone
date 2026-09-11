@@ -12,8 +12,13 @@ compact JSON pin - `{"lat": 28.6139, "lng": 77.209, "accuracy": 9.5, "address": 
 by `punch_location_payload()` and read back by `parse_punch_location()`, which also swallows the
 old plain-text `location` values so every historical row keeps rendering. The Home tracker asks
 the browser for a one-shot position (`geoTag()` in app.js, W3C device-location API) and
-reverse-geocodes it best-effort through OSM Nominatim; a missing API, a denied permission or a
-timeout never blocks a punch - the server then records `{"address": "Office"}` exactly as before.
+reverse-geocodes it best-effort through OSM Nominatim; if the browser GPS is unavailable
+(missing API, denied permission, GPS off, timeout - or the page is plain http, where the
+browser GPS API does not exist at all), `geoTag()` falls back to an approximate
+network-IP pin (`ipLocation()`, labelled "approx. IP location" in the address) and only
+records `{"address": "Office"}` when even that fails. A missing pin never blocks a punch,
+and the client toasts why the pin is missing or approximate. `app.js` is served with a
+`?v=<mtime>` cache-buster (`asset_v` in app.py) so browsers pick up JS fixes immediately.
 Enriched rows now carry `clock_in_location_label / clock_out_location_label` plus
 `clock_in_lat / clock_in_lng / clock_in_map` (same for `out`), the Attendance table and the
 day-detail modal render both pins with a "view on map" link, the Home tracker shows
